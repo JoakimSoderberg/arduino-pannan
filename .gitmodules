@@ -1,0 +1,15 @@
+[submodule "arduino-cmake"]
+	path = arduino-cmake
+	url = https://github.com/queezythegreat/arduino-cmake.git
+[submodule "DallasTemperature"]
+	path = DallasTemperature
+	url = https://github.com/milesburton/Arduino-Temperature-Control-Library.git
+[submodule "OneWire"]
+	path = OneWire
+	url = https://github.com/PaulStoffregen/OneWire.git
+[submodule "arduino_uip"]
+	path = arduino_uip
+	url = https://github.com/ntruchsess/arduino_uip
+[submodule "Ethernet"]
+	path = Ethernet
+	url = https://github.com/arduino-libraries/Ethernet.git
