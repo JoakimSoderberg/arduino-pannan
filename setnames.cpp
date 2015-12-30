@@ -21,12 +21,22 @@ int hex2bin(const char *s)
     return ret;
 }
 
-int parse_1wire_address(String addr_str, DeviceAddress addr)
+int parse_1wire_address(const char *addr_str, DeviceAddress addr)
 {
-    const char *s = addr_str.c_str();
+    const char *s = addr_str;
     int i = 0;
 
-    while (*s && (i < sizeof(addr)))
+    if (strlen(s) != ADDR_SIZE * 2)
+    {
+        Serial.print("\n\nAddress ");
+        Serial.print(s);
+        Serial.print(" must be ");
+        Serial.print(ADDR_SIZE * 2);
+        Serial.println(" characters long");
+        goto fail;
+    }
+
+    while (*s && (i < ADDR_SIZE))
     {
         addr[i++] = hex2bin(s);
 
@@ -36,7 +46,7 @@ int parse_1wire_address(String addr_str, DeviceAddress addr)
         s += 2;
     }
 
-    if (i != sizeof(addr))
+    if (i != ADDR_SIZE)
         goto fail;
 
     return 0;
@@ -44,41 +54,50 @@ fail:
     return -1;
 }
 
-int cmd_is_valid(String cmd)
-{
-    int i;
-    const char *valid_cmds[] = {
-        "SET",
-        "LIST",
-        "CLEAR",
-        "HELP"
-    };
-
-    for (i = 0; i < sizeof(valid_cmds) / sizeof(valid_cmds[0]); i++)
-    {
-        if (cmd == valid_cmds[i])
-            return 1;
-    }
-
-    return 0;
-}
-
 void parse_set_cmd()
 {
     DeviceAddress addr;
-    String addr_str = Serial.readStringUntil(' ');
+    //String addr_str = Serial.readStringUntil(' ');
+    char *addr_str = strtok(NULL, " ");
 
     if (parse_1wire_address(addr_str, addr) < 0)
     {
-        Serial.print("ERROR Could not parse address:");
+        Serial.print("\nERROR Could not parse address: ");
         Serial.println(addr_str);
-        Serial.readStringUntil('\n');
+        //Serial.readStringUntil('\n');
         return;
     }
 
-    String name = Serial.readStringUntil('\n');
+    //String name = Serial.readStringUntil('\n');
+    char *name = strtok(NULL, " ");
 
-    add_name(addr, name.c_str());
+    add_name(addr, name);
+}
+
+void parse_clear_cmd()
+{
+    clear_names();
+    Serial.println("OK Cleared EEPROM");
+}
+
+void parse_help_cmd()
+{
+    Serial.println("Commands:");
+    Serial.println(" SET <addr> <name>");
+    Serial.println(" LIST");
+    Serial.println(" CLEAR");
+    Serial.println(" HELP\n");
+}
+
+void parse_list_cmd()
+{
+    Serial.print("member_size(TempSensor, addr) = ");
+    Serial.println(member_size(TempSensor, addr));
+
+    Serial.print("member_size(TempSensor, name) = ");
+    Serial.println(member_size(TempSensor, name));
+
+    list_names();
 }
 
 void parse_serial()
@@ -86,16 +105,51 @@ void parse_serial()
     if (Serial.available() > 0)
     {
         String cmd = Serial.readStringUntil(' ');
+        cmd.replace("\r", "");
 
-        if (!cmd_is_valid(cmd))
+        if (cmd == "SET") parse_set_cmd();
+        else if (cmd == "LIST") parse_list_cmd();
+        else if (cmd == "CLEAR") parse_clear_cmd();
+        else if (cmd == "HELP") parse_help_cmd();
+        else if (cmd == " ") ;
+        else
         {
-            Serial.print("ERROR Unknown cmd: ");
-            Serial.println(cmd);
+            Serial.print("ERROR Unknown cmd: '");
+            Serial.print(cmd);
+            Serial.print("'");
+            Serial.println("");
             Serial.readStringUntil('\n');
             return;
         }
+    }
+}
 
-        parse_set_cmd();
+void parse_serial2()
+{
+    #define LINE_MAX 32
+    char line[LINE_MAX];
+
+    if (Serial.available() <= 0)
+        return;
+
+    int size = Serial.readBytesUntil('\n', line, LINE_MAX);
+    line[size] = 0;
+
+    String cmd = strtok(line, " ");
+    cmd.replace("\r", "").trim();
+
+    if (cmd == "SET") parse_set_cmd();
+    else if (cmd == "LIST") parse_list_cmd();
+    else if (cmd == "CLEAR") parse_clear_cmd();
+    else if (cmd == "HELP") parse_help_cmd();
+    else
+    {
+        Serial.print("ERROR Unknown cmd: '");
+        Serial.print(cmd);
+        Serial.print("'");
+        Serial.println("");
+        Serial.readStringUntil('\n');
+        return;
     }
 }
 
@@ -113,14 +167,6 @@ void setup()
 
 void loop()
 {
-
+    parse_serial2();
 }
 
-
-//
-// Callback for when serial data is available. 
-//
-/*void serialEvent()
-{
-    Serial.read()
-}*/

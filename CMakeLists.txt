@@ -77,5 +77,6 @@ generate_arduino_firmware(setnames
         DallasTemperature 
         Ethernet
     PORT /dev/tty.usbserial-A600exfH
+    SERIAL picocom @SERIAL_PORT@ --baud 9600 --nolock --echo
     BOARD ethernet)
 
