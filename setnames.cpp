@@ -71,12 +71,12 @@ void parse_set_cmd()
     //String name = Serial.readStringUntil('\n');
     char *name = strtok(NULL, " ");
 
-    add_name(addr, name);
+    eeprom_add_name(addr, name);
 }
 
 void parse_clear_cmd()
 {
-    clear_names();
+    eeprom_clear_names();
     Serial.println("OK Cleared EEPROM");
 }
 
@@ -97,7 +97,7 @@ void parse_list_cmd()
     Serial.print("member_size(TempSensor, name) = ");
     Serial.println(member_size(TempSensor, name));
 
-    list_names();
+    eeprom_list_names();
 }
 
 void parse_serial()
@@ -136,7 +136,8 @@ void parse_serial2()
     line[size] = 0;
 
     String cmd = strtok(line, " ");
-    cmd.replace("\r", "").trim();
+    cmd.replace("\r", "");
+    cmd.trim();
 
     if (cmd == "SET") parse_set_cmd();
     else if (cmd == "LIST") parse_list_cmd();
