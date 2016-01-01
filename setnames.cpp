@@ -91,14 +91,10 @@ void parse_help_cmd()
 
 void parse_list_cmd()
 {
-    Serial.print("member_size(TempSensor, addr) = ");
-    Serial.println(member_size(TempSensor, addr));
-
-    Serial.print("member_size(TempSensor, name) = ");
-    Serial.println(member_size(TempSensor, name));
-
     eeprom_list_names();
 }
+
+//SET 1234567891234567 abadb
 
 void parse_serial()
 {

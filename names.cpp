@@ -40,13 +40,18 @@ void eeprom_read_temp_sensors(TempSensor *temps, int *count)
 
     for (i = 0; i < MAX_TEMP_SENSORS; i++)
     {
+        Serial.print(".");
+
         if (eeprom_read_temp_sensor_index(i, &temps[i]) < 0)
         {
+            Serial.println();
             return;
         }
 
         (*count)++;
     }
+
+    Serial.println();
 }
 
 void eeprom_write_temp_sensor(int i, TempSensor *sensor)
@@ -107,6 +112,7 @@ void eeprom_set_name(int i, DeviceAddress addr, const char *name)
     TempSensor sensor;
     memcpy(&sensor.addr, addr, ADDR_SIZE);
     strcpy(sensor.name, name);
+    sensor.name[strcspn(sensor.name, "\r\n")] = 0;
 
     eeprom_write_temp_sensor(i, &sensor);
 }
@@ -122,11 +128,11 @@ void eeprom_add_name(DeviceAddress addr, const char *name)
     if ((i = eeprom_find_address(temps, temp_count, addr, NULL, 0)) < 0)
     {
         i = temp_count; // Address not found so append.
-        Serial.print(" Address not found, appending to index ");
+        Serial.print(F(" Address not found, appending to index "));
     }
     else
     {
-        Serial.print(" Adding address to index ");
+        Serial.print(F(" Adding address to index "));
     }
 
     Serial.println(i);
@@ -145,8 +151,8 @@ void eeprom_list_names()
 
     Serial.print("OK ");
     Serial.print(count);
-    Serial.println(" found");
-    Serial.println(" Index;Address;Name");
+    Serial.println(F(" found"));
+    Serial.println(F(" Index;Address;Name"));
 
     for (i = 0; i < count; i++)
     {

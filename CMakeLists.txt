@@ -8,7 +8,7 @@ project(pannan)
 
 option(USE_ETHERNET "Is this meant for use with Arduino Ethernet?" ON)
 
-#set(ARDUINO_DEFAULT_BOARD ethernet) # Default Board ID, when not specified
+set(ARDUINO_DEFAULT_BOARD ethernet) # Default Board ID, when not specified
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/arduino-cmake/cmake/Platform)
 include(Arduino)
@@ -68,14 +68,14 @@ generate_arduino_firmware(pannan
         DallasTemperature 
         Ethernet
     PORT /dev/tty.usbserial-A600exfH
+    SERIAL picocom @SERIAL_PORT@ --baud 9600 --nolock --echo
     BOARD ethernet)
 
 generate_arduino_firmware(setnames
     SRCS setnames.cpp
     HDRS pannan.h
     LIBS 
-        DallasTemperature 
-        Ethernet
+        DallasTemperature
     PORT /dev/tty.usbserial-A600exfH
     SERIAL picocom @SERIAL_PORT@ --baud 9600 --nolock --echo
     BOARD ethernet)
