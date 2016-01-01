@@ -17,6 +17,8 @@ message("Arduino SDK v${ARDUINO_SDK_VERSION}")
 print_board_list()
 print_programmer_list()
 
+add_definitions(-DPANNAN_CLIENT -DPANNAN_SERVER)
+
 ##
 ## Ethernet library.
 ##
@@ -42,6 +44,37 @@ generate_arduino_library(Ethernet
             ${ETHER_DIR}/src/utility/w5100.h
     )
 
+#
+# Button library.
+#
+set(BUTTON_DIR ${CMAKE_SOURCE_DIR}/Button)
+include_directories(${BUTTON_DIR}/src)
+
+generate_arduino_library(Button
+    SRCS    ${BUTTON_DIR}/Button.cpp
+    HDRS    ${BUTTON_DIR}/Button.h)
+
+#
+# Button library.
+#
+set(HTTPCLIENT_DIR ${CMAKE_SOURCE_DIR}/HTTPClient)
+include_directories(${HTTPCLIENT_DIR}/src)
+
+generate_arduino_library(HTTPClient
+    SRCS    ${HTTPCLIENT_DIR}/HTTPClient.cpp
+    HDRS    ${HTTPCLIENT_DIR}/HTTPClient.h)
+
+
+#
+# SoftwareSerial library.
+#
+#set(SOFTWARESERIAL_DIR ${CMAKE_SOURCE_DIR}/SoftwareSerial)
+#include_directories(${SOFTWARESERIAL_DIR}/src)
+
+#generate_arduino_library(SoftwareSerial
+#    SRCS    ${SOFTWARESERIAL_DIR}/SoftwareSerial.cpp
+#    HDRS    ${SOFTWARESERIAL_DIR}/SoftwareSerial.h)
+
 ##
 ## OneWire library.
 ##
@@ -65,8 +98,10 @@ generate_arduino_firmware(pannan
     SRCS pannan.cpp
     HDRS pannan.h
     LIBS 
-        DallasTemperature 
-        Ethernet
+        DallasTemperature
+        HTTPClient
+        #Ethernet
+        #SoftwareSerial
     PORT /dev/tty.usbserial-A600exfH
     SERIAL picocom @SERIAL_PORT@ --baud 9600 --nolock --echo
     BOARD ethernet)

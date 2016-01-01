@@ -3,6 +3,9 @@
 #include <DallasTemperature.h>
 #include <EEPROM.h>
 #include <Ethernet.h>
+#include <SoftwareSerial.h>
+#include <Button.h>
+//#include <HTTPClient.h>
 
 #include "pannan.h"
 #include "names.h"
@@ -38,8 +41,19 @@ void __cxa_pure_virtual(void)
 #define TEMPERATURE_PRECISION 12
 
 #define ERROR_LED_PIN 4
+#define UP_PIN 5
+Button up_button = Button(UP_PIN, PULLUP);
+#define DOWN_PIN 6
+Button down_button = Button(DOWN_PIN, PULLUP);
+unsigned long lcd_last_page_switch = 0;
+unsigned long lcd_both_buttons_start = 0;
+int lcd_start_index = 0;
+int lcd_scroll_enabled = 1;
 
 #define READ_DELAY 5000
+
+// Attach the serial display's RX line to digital pin 3
+SoftwareSerial lcd(4,3); // pin 2 = TX, pin 3 = RX (unused)
 
 byte mac[] = { 0xDE, 0x01, 0xBE, 0xEF, 0xFE, 0xED };
 
@@ -51,11 +65,12 @@ DallasTemperature sensors(&oneWire);
 
 #ifdef PANNAN_CLIENT
 EthernetClient client;
-char server[] = "192.168.0.230";
-IPAddress server_addr = IPAddress(192, 168, 0, 230);
+//char server[] = "192.168.0.230";
+IPAddress server_addr = IPAddress(192, 168, 0, 146);
 int server_port = 9000;
-#else // PANNAN_CLIENT
+#endif // PANNAN_CLIENT
 
+#ifdef PANNAN_SERVER
 EthernetServer server(80);
 
 #endif
@@ -93,18 +108,18 @@ void prepare_sensors()
     // Locate devices on the bus
     sensors.begin();
 
-    delay(100);
+    delay(5000);
 
     ctx.count = sensors.getDeviceCount();
-
+/*
     Serial.print(F("Locating devices..."));
     Serial.print("Found ");
     Serial.print(ctx.count, DEC);
     Serial.println(" devices.");
 
-    Serial.println(F("Get device names from EEPROM..."));
+    Serial.println(F("Get device names from EEPROM..."));*/
     eeprom_read_temp_sensors(names, &name_count);
-    delay(100);
+    delay(5000);
 
     for (i = 0; i < ctx.count; i++)
     {
@@ -131,14 +146,9 @@ void prepare_sensors()
     }
 }
 
-void print_ip()
+void print_ip(IPAddress ip)
 {
-    for (byte i = 0; i < 4; i++)
-    {
-        Serial.print(Ethernet.localIP()[i], DEC);
-        if (i != 3) Serial.print(".");
-    }
-
+    ip.printTo(Serial);
     Serial.println();
 }
 
@@ -151,14 +161,14 @@ void feed_dhcp()
             break;
         case 2:
             Serial.println(F("Renew success"));
-            print_ip();
+            print_ip(Ethernet.localIP());
             break;
         case 3:
             Serial.println(F("Error: rebind fail"));
             break;
         case 4:
             Serial.println(F("Rebind success"));
-            print_ip();
+            print_ip(Ethernet.localIP());
             break;
 
         default:
@@ -186,7 +196,7 @@ void print_sensor_json(EthernetClient *c, int i, TempSensor *s)
     c->print("    }");
 }
 
-void print_http_request_body(EthernetClient *c)
+void print_http_request_json(EthernetClient *c)
 {
     c->println("{");
     c->println("  \"sensors\":");
@@ -213,27 +223,29 @@ void print_http_request_body(EthernetClient *c)
 #ifdef PANNAN_CLIENT
 void print_http_request_header()
 {
-    client.println("PUT / HTTP/1.1");
-    client.print("Host: ");
-    client.println(server);
-    client.println("User-Agent: arduino-ethernet");
-    client.println("Connection: close");
-    client.println("Content-Type: application/json");
+    client.println(F("PUT / HTTP/1.1"));
+    client.print(F("Host: "));
+    server_addr.printTo(client);
+    client.println();
+    client.println(F("User-Agent: arduino-ethernet"));
+    client.println(F("Connection: close"));
+    client.println(F("Content-Type: application/json"));
     client.println();
 }
 
 void http_request()
 {
     int ret;
-    Serial.println("Making HTTP request...");
+    Serial.print(F("Making HTTP request: "));
+    print_ip(server_addr);
     client.stop();
 
     if ((ret = client.connect(server_addr, server_port)))
     {
-        Serial.println("Connected...");
+        Serial.println(F("  Connected..."));
 
         print_http_request_header();
-        print_http_request_body(&client);
+        print_http_request_json(&client);
 
         while (client.connected())
         {
@@ -241,24 +253,152 @@ void http_request()
             {
                 char c = client.read();
                 Serial.print(c);
-            }      
+            }
         }
 
-        Serial.println();
         client.stop();
+        Serial.println(F("  Disconnected"));
     }
     else
     {
-        Serial.print("Connection failed: ");
+        Serial.print(F("Connection failed: "));
         Serial.println(ret);
         client.stop();
     }
 }
 #endif // PANNAN_CLIENT
 
+//
+// position 1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16
+// line 1  128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143
+// line 2  192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207
+
+void lcd_clear()
+{
+    lcd.write(254); // Move cursor to beginning of first line.
+    lcd.write(128);
+    lcd.write("                "); // Clear display.
+
+    lcd.write(254); 
+    lcd.write(192);
+    lcd.write("                ");
+
+    lcd.write(254); // move cursor to beginning of first line
+    lcd.write(128);
+}
+
+void print_lcd_started()
+{
+    lcd_clear();
+    lcd.write("Started!");
+}
+
+void print_lcd_temperature_buf(int i)
+{
+    char buf[16];
+    char str_temp[6];
+    dtostrf(ctx.temps[i].temp, 2, 2, str_temp);
+    sprintf(buf, "%-10s%4sC", ctx.temps[i].name, str_temp);
+    lcd.write(buf);
+}
+
+void print_lcd_temperatures()
+{
+    int i = lcd_start_index;
+    char str_temp[6];
+
+    // Move cursor to beginning of first line.
+    lcd.write(254);
+    lcd.write(128);
+
+    print_lcd_temperature_buf(i);
+    i++;
+
+    // Move cursor to beginning of second line.
+    lcd.write(254); 
+    lcd.write(192);
+
+    if (i < ctx.count)
+    {
+        print_lcd_temperature_buf(i);
+    }
+    else
+    {
+        lcd.write("                ");
+    }
+}
+
+void lcd_do_scroll()
+{
+    // Switch page if it's time.
+    if ((millis() - lcd_last_page_switch) > READ_DELAY)
+    {
+        lcd_start_index += 2;
+        if (lcd_start_index >= ctx.count)
+            lcd_start_index = 0;
+        lcd_last_page_switch = millis();
+    }
+}
+
+void lcd_button_state_change()
+{
+    if (up_button.isPressed() && down_button.isPressed())
+    {
+        if (!lcd_scroll_enabled)
+        {
+            lcd_scroll_enabled = 1;
+            lcd_clear();
+            lcd.println(F("Scroll enabled"));
+            delay(1000);
+        }    
+        return;
+    }
+
+    lcd_both_buttons_start = millis();
+
+    if (millis() - lcd_last_page_switch > 500)
+    {
+        if (up_button.isPressed())
+        {
+            Serial.println("UP");
+            lcd_start_index -= 2;
+        }
+        else if (down_button.isPressed())
+        {
+            Serial.println("DOWN");
+
+            if ((lcd_start_index + 1) < ctx.count)
+                lcd_start_index += 2;
+        }
+
+        if (lcd_scroll_enabled)
+        {
+            lcd.println(F("Scroll disabled"));
+            delay(1000);
+            lcd_scroll_enabled = 0;
+        }
+
+        lcd_start_index = max(0, lcd_start_index);
+        lcd_start_index %= ctx.count;
+
+        lcd_last_page_switch = millis();
+
+        print_lcd_temperatures();
+    }
+}
+
+#define CHTML(str) client.print(F(str))
+#define SHTML(str) sclient.print(F(str))
+
+void print_html_form()
+{
+
+}
+
 void setup()
 {
-    int i;
+    //prepare_sensors();
+
     Serial.begin(9600);
 
     while (!Serial)
@@ -268,10 +408,14 @@ void setup()
 
     Serial.println(F("Serial port active..."));
 
+    lcd.begin(9600);
+    delay(500);
+    Serial.println(F("LCD serial active..."));
+
     prepare_sensors();
 
     delay(5000);
-    Serial.println("Start Ethernet...");
+    Serial.println(F("Start Ethernet..."));
 
     // Initiate DHCP request for IP.
     if (Ethernet.begin(mac) == 0)
@@ -284,14 +428,29 @@ void setup()
     }
 
     Serial.println(F("DHCP request successful"));
-    print_ip();
+    print_ip(Ethernet.localIP());
 
+    #ifdef PANNAN_SERVER
     server.begin();
     delay(5000);
+    #endif
+
+    print_lcd_started();
+    delay(1000);
 }
 
 void loop()
 {
+    if (lcd_scroll_enabled)
+    {
+        lcd_do_scroll();
+    }
+
+    if (up_button.isPressed() || down_button.isPressed())
+    {
+        lcd_button_state_change();
+    }
+
     if ((millis() - last_temp_read) > READ_DELAY)
     {
         sensors.requestTemperatures();
@@ -308,39 +467,36 @@ void loop()
         #endif
 
         last_temp_read = millis();
+
+        print_lcd_temperatures();
     }
 
     // Server.
-    #ifndef PANNAN_CLIENT
+    #ifdef PANNAN_SERVER
 
-    EthernetClient client = server.available();
+    EthernetClient sclient = server.available();
 
-    if (client)
+    if (sclient)
     {
         Serial.println(F("New client"));
 
-        // A HTTP request ends with a blank line
+        // A HTTP request ends with a blank line.
         boolean blank_line = true;
 
-        while (client.connected())
+        while (sclient.connected())
         {
-            if (client.available())
+            if (sclient.available())
             {
-                char c = client.read();
+                char c = sclient.read();
                 Serial.write(c);
-                
-                // Look for end of request.
+
                 if (c == '\n' && blank_line)
                 {
-                    // send a standard http response header
-                    client.println("HTTP/1.1 200 OK");
-                    client.println("Content-Type: text/html");
-                    client.println("Connection: close");  // the connection will be closed after completion of the response
-                    //client.println("Refresh: 5");  // refresh the page automatically every 5 sec
-                    client.println("Content-Type: application/json");
-                    client.println();
-                    
-                    print_http_request_body(&client);
+                    sclient.println("HTTP/1.1 200 OK");
+                    sclient.println("Connection: close");
+                    sclient.println("Content-Type: application/json");
+                    sclient.println();
+                    print_http_request_json(&sclient);
                     break;
                 }
 
@@ -359,8 +515,7 @@ void loop()
 
         // Give the web browser time to receive the data
         delay(1);
-        // close the connection:
-        client.stop();
+        sclient.stop();
         Serial.println("Client disconnected");
     }
     #endif // !PANNAN_CLIENT
