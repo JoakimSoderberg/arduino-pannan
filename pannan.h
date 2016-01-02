@@ -19,6 +19,7 @@ typedef struct TempSensor {
 #define NAME_SIZE member_size(TempSensor, name)
 #define DATA_SIZE (1 + ADDR_SIZE + NAME_SIZE) // 1 for "used" status
 
+// TODO: Add all settings here!
 typedef struct Context {
 	TempSensor temps[MAX_TEMP_SENSORS];
 	int count;

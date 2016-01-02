@@ -71,6 +71,7 @@ EthernetClient client;
 char server_hostname[32] = "higgs";
 int server_port = HTTP_REQUEST_PORT_DEFAULT;
 int http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
+unsigned long last_http_request = 0;
 
 #endif // PANNAN_CLIENT
 
@@ -383,7 +384,62 @@ int http_request()
 
 void print_html_form()
 {
+    // TODO: Make HTML Form to set names in eeprom.
+}
 
+void feed_server()
+{
+    EthernetClient sclient = server.available();
+
+    if (sclient)
+    {
+        Serial.println(F("New client"));
+
+        // A HTTP request ends with a blank line.
+        boolean blank_line = true;
+
+        while (sclient.connected())
+        {
+            if (sclient.available())
+            {
+                char c = sclient.read();
+                Serial.write(c);
+
+                if (c == '\n' && blank_line)
+                {
+                    char *s = get_http_request_json();
+                    
+                    sclient.println("HTTP/1.1 200 OK");
+                    sclient.println("Connection: close");
+                    sclient.println("Content-Type: application/json");
+                    sclient.print("Content-Length: ");
+                    sclient.println(strlen(s));
+                    sclient.println();
+
+                    sclient.print(s);
+                    free(s);
+
+                    break;
+                }
+
+                if (c == '\n')
+                {
+                    // you're starting a new line
+                    blank_line = true;
+                }
+                else if (c != '\r')
+                {
+                    // you've gotten a character on the current line
+                    blank_line = false;
+                }
+            }
+        }
+
+        // Give the web browser time to receive the data
+        delay(1);
+        sclient.stop();
+        Serial.println("Client disconnected");
+    }
 }
 
 #endif // PANNAN_SERVER
@@ -579,73 +635,27 @@ void loop()
             print_sensor(i, &ctx.temps[i], 0, 1);
         }
 
-        #ifdef PANNAN_CLIENT
-        if (http_request() != 200)
-        {
-            set_error("HTTP client fail");
-        }
-        #endif
-
         last_temp_read = millis();
 
         print_lcd_temperatures();
     }
 
-    // Server.
-    #ifdef PANNAN_SERVER
-
-    EthernetClient sclient = server.available();
-
-    if (sclient)
+    #ifdef PANNAN_CLIENT
+    if ((millis() - last_http_request) > http_request_delay)
     {
-        Serial.println(F("New client"));
-
-        // A HTTP request ends with a blank line.
-        boolean blank_line = true;
-
-        while (sclient.connected())
+        if (http_request() != 200)
         {
-            if (sclient.available())
-            {
-                char c = sclient.read();
-                Serial.write(c);
-
-                if (c == '\n' && blank_line)
-                {
-                    char *s = get_http_request_json();
-                    
-                    sclient.println("HTTP/1.1 200 OK");
-                    sclient.println("Connection: close");
-                    sclient.println("Content-Type: application/json");
-                    sclient.print("Content-Length: ");
-                    sclient.println(strlen(s));
-                    sclient.println();
-
-                    sclient.print(s);
-                    free(s);
-
-                    break;
-                }
-
-                if (c == '\n')
-                {
-                    // you're starting a new line
-                    blank_line = true;
-                }
-                else if (c != '\r')
-                {
-                    // you've gotten a character on the current line
-                    blank_line = false;
-                }
-            }
+            set_error("HTTP client fail");
         }
 
-        // Give the web browser time to receive the data
-        delay(1);
-        sclient.stop();
-        Serial.println("Client disconnected");
+        last_http_request = millis(); 
     }
-    #endif // !PANNAN_CLIENT
+    #endif // PANNAN_CLIENT
+
+    // Server.
+    #ifdef PANNAN_SERVER
+    feed_server();
+    #endif // PANNAN_SERVER
 
     feed_dhcp();
 }
