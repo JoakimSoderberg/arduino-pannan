@@ -50,29 +50,33 @@ unsigned long lcd_both_buttons_start = 0;
 int lcd_start_index = 0;
 int lcd_scroll_enabled = 1;
 
+// Time between reading the temperature sensors.
 #define READ_DELAY 5000
 
 // Attach the serial display's RX line to digital pin 3
-SoftwareSerial lcd(4,3); // pin 2 = TX, pin 3 = RX (unused)
+SoftwareSerial lcd(4,3); // pin 3 = TX, pin 4 = RX (unused)
 
-byte mac[] = { 0xDE, 0x01, 0xBE, 0xEF, 0xFE, 0xED };
+byte mac[] = { 0xDE, 0x01, 0xBE, 0x3E, 0x21, 0xED };
 
-// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
-
-// Pass our oneWire reference to Dallas Temperature. 
 DallasTemperature sensors(&oneWire);
 
 #ifdef PANNAN_CLIENT
+
+#define HTTP_REQUEST_PORT_DEFAULT 9000
+#define HTTP_REQUEST_DELAY_DEFAULT 5000
+
+// This is used to do HTTP PUT of the json to a specified server.
 EthernetClient client;
-//char server[] = "192.168.0.230";
+char server_hostname[32] = "higgs";
 IPAddress server_addr = IPAddress(192, 168, 0, 146);
-int server_port = 9000;
+int server_port = HTTP_REQUEST_PORT_DEFAULT;
+int http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
+
 #endif // PANNAN_CLIENT
 
 #ifdef PANNAN_SERVER
 EthernetServer server(80);
-
 #endif
 
 Context ctx;
@@ -111,13 +115,13 @@ void prepare_sensors()
     delay(5000);
 
     ctx.count = sensors.getDeviceCount();
-/*
+
     Serial.print(F("Locating devices..."));
     Serial.print("Found ");
     Serial.print(ctx.count, DEC);
     Serial.println(" devices.");
 
-    Serial.println(F("Get device names from EEPROM..."));*/
+    Serial.println(F("Get device names from EEPROM..."));
     eeprom_read_temp_sensors(names, &name_count);
     delay(5000);
 
@@ -269,45 +273,20 @@ char *get_http_request_json()
     {
         get_sensor_json(&s[offset], i, &ctx.temps[i]);
         offset += strlen(&s[offset]);
-        sprintf(&s[offset], "%s\n", (i != (ctx.count - 1)) ? "," : "");
-    }
 
-    strcat(s, REQ_JSON_FOOTER);
-}
-
-void print_sensor_json(EthernetClient *c, int i, TempSensor *s)
-{
-    char buf[256];
-    c->print(get_sensor_json(buf, i, s));
-}
-
-void print_http_request_json(EthernetClient *c)
-{
-    char *s = get_http_request_json();
-    c->print(s);
-    free(s);
-    #if 0
-    c->println("{");
-    c->println("  \"sensors\":");
-    c->println("  [");
-    
-    for (int i = 0; i < ctx.count; i++)
-    {
-        print_sensor_json(c, i, &ctx.temps[i]);
-        
         if (i != (ctx.count - 1))
         {
-            c->println(",");
+            strcat(&s[offset], ",\n");
+            offset += 2;
         }
         else
         {
-            c->println();
+            strcat(&s[offset], "\n");
+            offset++;
         }
     }
 
-    c->println("  ]");
-    c->println("}");
-    #endif
+    strcat(s, REQ_JSON_FOOTER);
 }
 
 #ifdef PANNAN_CLIENT
@@ -326,7 +305,7 @@ void print_http_request_header()
 void http_request()
 {
     int ret;
-    Serial.print(F("Making HTTP request: "));
+    Serial.print(F("HTTP Client request to "));
     print_ip(server_addr);
     client.stop();
 
@@ -345,7 +324,7 @@ void http_request()
         client.println(F("User-Agent: arduino-ethernet"));
         client.println(F("Connection: close"));
         client.println(F("Content-Type: application/json"));
-        client.print("Content-Length: ");
+        client.print(F("Content-Length: "));
         client.println(strlen(s));
         client.println(); // End of header.
 
