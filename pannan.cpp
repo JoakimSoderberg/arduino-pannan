@@ -69,7 +69,6 @@ DallasTemperature sensors(&oneWire);
 // This is used to do HTTP PUT of the json to a specified server.
 EthernetClient client;
 char server_hostname[32] = "higgs";
-IPAddress server_addr = IPAddress(192, 168, 0, 146);
 int server_port = HTTP_REQUEST_PORT_DEFAULT;
 int http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
 
@@ -290,27 +289,38 @@ char *get_http_request_json()
 }
 
 #ifdef PANNAN_CLIENT
-void print_http_request_header()
+
+int get_http_status_code(char *buf, int bufsize)
 {
-    client.println(F("PUT / HTTP/1.1"));
-    client.print(F("Host: "));
-    server_addr.printTo(client);
-    client.println();
-    client.println(F("User-Agent: arduino-ethernet"));
-    client.println(F("Connection: close"));
-    client.println(F("Content-Type: application/json"));
-    client.println();
+    if (!strncmp(buf, "HTTP/1.", 7))
+    {
+        // Skip "HTTP/1.x "
+        int start = 7 + 2;
+        if (start >= bufsize)
+            return 0;
+
+        int end = start;
+        while (isdigit(buf[end]) && (end < bufsize)) end++;
+        buf[end] = 0;
+
+        return atoi(&buf[start]);
+    }
+
+    return 0;
 }
 
-void http_request()
+int http_request()
 {
+    int status_code = 0;
     int ret;
     Serial.print(F("HTTP Client request to "));
-    print_ip(server_addr);
+    Serial.println(server_hostname);
     client.stop();
 
-    if ((ret = client.connect(server_addr, server_port)))
+    if ((ret = client.connect(server_hostname, server_port)))
     {
+        int j = 0;
+        int end;
         Serial.println(F("  Connected..."));
 
         // This needs to be allocated so we can calculate
@@ -319,8 +329,7 @@ void http_request()
 
         client.println(F("PUT / HTTP/1.1"));
         client.print(F("Host: "));
-        server_addr.printTo(client);
-        client.println();
+        client.println(server_hostname);
         client.println(F("User-Agent: arduino-ethernet"));
         client.println(F("Connection: close"));
         client.println(F("Content-Type: application/json"));
@@ -331,16 +340,29 @@ void http_request()
         client.print(s);
         free(s);
 
+        char buf[16];
+        memset(buf, 0, sizeof(buf));
+
         while (client.connected())
         {
             if (client.available())
             {
                 char c = client.read();
                 Serial.print(c);
+
+                // Save the first line so we can parse status.
+                if (j < sizeof(buf))
+                {
+                    buf[j++] = c;
+                }
             }
         }
 
+        status_code = get_http_status_code(buf, sizeof(buf));
+
         client.stop();
+        Serial.print("Status code: ");
+        Serial.println(status_code);
         Serial.println(F("  Disconnected"));
     }
     else
@@ -349,8 +371,22 @@ void http_request()
         Serial.println(ret);
         client.stop();
     }
+
+    return status_code;
 }
 #endif // PANNAN_CLIENT
+
+#ifdef PANNAN_SERVER
+
+#define CHTML(str) client.print(F(str))
+#define SHTML(str) sclient.print(F(str))
+
+void print_html_form()
+{
+
+}
+
+#endif // PANNAN_SERVER
 
 //
 // position 1   2   3   4   5   6   7   8   9   10  11  12  13  14  15  16
@@ -471,12 +507,9 @@ void lcd_button_state_change()
     }
 }
 
-#define CHTML(str) client.print(F(str))
-#define SHTML(str) sclient.print(F(str))
-
-void print_html_form()
+void set_error(const char *error)
 {
-
+    // TODO: Set error stuff. Turn on LED, show LCD message.
 }
 
 void setup()
@@ -547,7 +580,10 @@ void loop()
         }
 
         #ifdef PANNAN_CLIENT
-        http_request();
+        if (http_request() != 200)
+        {
+            set_error("HTTP client fail");
+        }
         #endif
 
         last_temp_read = millis();
