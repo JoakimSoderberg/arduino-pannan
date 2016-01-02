@@ -4,7 +4,7 @@
 
 #include <DallasTemperature.h>
 
-void print_address(DeviceAddress address);
+void print_address(Print &c, DeviceAddress addr);
 
 void eeprom_add_name(DeviceAddress addr, const char *name);
 void eeprom_clear_names();

@@ -40,13 +40,12 @@ void __cxa_pure_virtual(void)
 #define ONE_WIRE_BUS 2
 #define TEMPERATURE_PRECISION 12
 
-#define ERROR_LED_PIN 4
+#define ERROR_LED_PIN 13
 #define UP_PIN 5
-Button up_button = Button(UP_PIN, PULLUP);
 #define DOWN_PIN 6
+Button up_button = Button(UP_PIN, PULLUP);
 Button down_button = Button(DOWN_PIN, PULLUP);
 unsigned long lcd_last_page_switch = 0;
-unsigned long lcd_both_buttons_start = 0;
 int lcd_start_index = 0;
 int lcd_scroll_enabled = 1;
 
@@ -87,7 +86,7 @@ void print_sensor(int i, TempSensor *sensor,
 {
     Serial.print(i);
     Serial.print(": ");
-    print_address(sensor->addr);
+    print_address(Serial, sensor->addr);
 
     if (show_temperature)
     {
@@ -177,16 +176,6 @@ void feed_dhcp()
 
         default:
             break;
-    }
-}
-
-void print_address_json(EthernetClient *c, TempSensor *s)
-{
-    for (uint8_t i = 0; i < ADDR_SIZE; i++)
-    {
-        // zero pad the address if necessary
-        if (s->addr[i] < 16) c->print("0");
-        c->print(s->addr[i], HEX);
     }
 }
 
@@ -380,11 +369,163 @@ int http_request()
 #ifdef PANNAN_SERVER
 
 #define CHTML(str) client.print(F(str))
-#define SHTML(str) sclient.print(F(str))
+#define SHTML(str) c.print(F(str))
 
-void print_html_form()
+#define HTML_OK "200 OK"
+#define HTML_CONTENT_TYPE "text/html; charset=utf-8"
+
+void send_http_response_header(Print &c,
+                            const char *status = HTML_OK,
+                            const char *content_type = HTML_CONTENT_TYPE,
+                            int end = 1)
 {
-    // TODO: Make HTML Form to set names in eeprom.
+  c.print(F("HTTP/1.1 "));
+  c.println(status);
+  c.print(F("Content-Type: "));
+  c.println(content_type);
+  if (end) c.println();
+}
+
+void server_404_reply(Print &c)
+{
+    send_http_response_header(c, "404 Not Found");
+    SHTML("<html>404 bad url!</html>");
+}
+
+void server_unsupported_reply(Print &c)
+{
+    send_http_response_header(c, "501 Method not supported");
+}
+
+void server_json_reply(Print &c, char *url)
+{
+    char *s = get_http_request_json();
+
+    send_http_response_header(c, HTML_OK, "application/json", 0);
+    c.print("Content-Length: ");
+    c.println(strlen(s));
+    c.println();
+
+    c.print(s);
+    free(s);
+}
+
+void server_names_form_reply(Print &c, char *url)
+{
+    TempSensor *s;
+    send_http_response_header(c);
+
+    SHTML("<html>"
+          "<body>"
+          "<h1>Sensor names</h1>"
+          "<table>"
+          "<tr><th>Index</th><th>Address</th><th>Name</th></tr>");
+    
+    for (int i = 0; i < ctx.count; i++)
+    {
+        s = &ctx.temps[i];
+
+        SHTML("<tr><td>");
+        c.print(i);
+        SHTML("</td><td>");
+        print_address(c, s->addr);
+        SHTML("</td><td>");
+        c.print(s->name);
+        SHTML("</td><td>");
+        SHTML("<form action='editname' method='get'>"
+              "<input type='submit' value='Edit' />"
+              "<input type='hidden' name='i' value='");
+        c.print(i);
+        SHTML("'/></form></td></tr>");
+    }
+
+    SHTML("</table>"
+          "</form>"
+          "</body>"
+          "</html>");
+}
+
+#define SKIP_UNTIL_NEXT_PARAM(s) \
+    while (*s && (*s != '&') && (*s != '\n')) s++;
+
+int parse_url_params(char *url)
+{
+
+}
+
+void server_editname_form_reply(Print &c, char *url)
+{
+    int i = 0;
+    {
+        char *start = url;
+        char *s = start;
+        send_http_response_header(c);
+
+        Serial.println(url);
+
+        while (*s)
+        {
+            if (!strncmp(s, "i=", 2))
+            {
+                s += 2;
+                start = s;
+                //SKIP_UNTIL_NEXT_PARAM(s);
+                while (*s && (*s != '&') && (*s != '\n')) s++;
+                *s = 0;
+                i = atoi(start);
+                //while (*s && (*s != '&') && (*s != '\n')) s++;
+            }
+            s++;
+        }
+    }
+
+    if ((i < 0) || (i >= ctx.count))
+    {
+        server_404_reply(c);
+        return;
+    }
+
+    TempSensor *s = &ctx.temps[i];
+
+    SHTML("<html>"
+          "<body>"
+          "<h1>Edit sensor name</h1>"
+          "<table>");
+
+    //      "<tr><th>Index</th><th>Address</th><th>Name</th></tr>");
+    SHTML("<tr><th>Index:</th><td>");
+    c.print(i);
+    SHTML("</td></tr>");
+
+    SHTML("<tr><th>Address:</th><td>");
+    print_address(c, s->addr);
+    SHTML("</td></tr>");
+
+    SHTML("<tr><th>Name:</th><td>"
+          "<form action='/setname'>"
+          "<input type='text' value='");
+    c.print(s->name);
+    SHTML("'/></td></tr>");
+
+    SHTML("</table>"
+          "</form>"
+          "</body>"
+          "</html>");
+}
+
+void server_setname_reply(Print &c, char *url)
+{
+    server_unsupported_reply(c);
+}
+
+char *server_get_url(int i, char *buf, int bufsize)
+{
+    char *url = &buf[i];
+    while ((i < (bufsize - 1)) && buf[i] != ' ')
+        i++;
+    buf[i] = 0;
+
+    return url;
 }
 
 void feed_server()
@@ -393,6 +534,16 @@ void feed_server()
 
     if (sclient)
     {
+        char buf[64];
+        char *url = NULL;
+        int j = 0;
+        typedef enum method_type_e
+        {
+            UNSUPPORTED,
+            GET,
+            POST
+        } method_type_t;
+        method_type_t method = UNSUPPORTED;
         Serial.println(F("New client"));
 
         // A HTTP request ends with a blank line.
@@ -405,19 +556,78 @@ void feed_server()
                 char c = sclient.read();
                 Serial.write(c);
 
+                if (j < sizeof(buf))
+                    buf[j++] = c;
+
+                // if we've gotten to the end of the line (received a newline
+                // character) and the line is blank, the http request has ended,
+                // so we can send a reply
                 if (c == '\n' && blank_line)
                 {
-                    char *s = get_http_request_json();
-                    
-                    sclient.println("HTTP/1.1 200 OK");
-                    sclient.println("Connection: close");
-                    sclient.println("Content-Type: application/json");
-                    sclient.print("Content-Length: ");
-                    sclient.println(strlen(s));
-                    sclient.println();
+                    // Find the URL.
+                    for (int i = 0; i < sizeof(buf); i++)
+                    {
+                        if (!strncmp(&buf[i], "GET ", 4))
+                        {
+                            i += 4;
+                            url = server_get_url(i, buf, sizeof(buf));
+                            method = GET;
+                        }
+                        else if (!strncmp(&buf[i], "POST ", 5))
+                        {
+                            i += 5;
+                            url = server_get_url(i, buf, sizeof(buf));
+                            method = POST;
+                        }
+                    }
 
-                    sclient.print(s);
-                    free(s);
+                    if (method == GET)
+                    {
+                        if (!strcmp(url, "/") || !strncmp(url, "/json", 5))
+                        {
+                            server_json_reply(sclient, url);
+                        }
+                        else if (!strncmp(url, "/names", 6))
+                        {
+                            server_names_form_reply(sclient, url + 6);
+                        }
+                        else if (!strncmp(url, "/editname?", 10))
+                        {
+                            server_editname_form_reply(sclient, url + 10);
+                        }
+                        else if (!strncmp(url, "/setname", 8))
+                        {
+                            server_setname_reply(sclient, url);
+                        }
+                        else
+                        {
+                            server_404_reply(sclient);
+                        }
+                    }
+                    else if (method == POST)
+                    {
+                        char *post;
+                        j = 0;
+                        while (sclient.available())
+                        {
+                            c = sclient.read();
+                            Serial.write(c);
+
+                            if (j < sizeof(buf))
+                                buf[j++] = c;
+                        }
+
+                        post = server_get_url(0, buf, sizeof(buf));
+                        Serial.print(F("Post:"));
+                        Serial.println(post);
+                        goto end;
+                    }
+                    else
+                    {
+                        Serial.println(F("Unsupported method"));
+                        server_unsupported_reply(sclient);
+                        goto end;
+                    }
 
                     break;
                 }
@@ -434,11 +644,11 @@ void feed_server()
                 }
             }
         }
-
+    end:
         // Give the web browser time to receive the data
         delay(1);
         sclient.stop();
-        Serial.println("Client disconnected");
+        Serial.println(F("Client disconnected"));
     }
 }
 
@@ -467,6 +677,9 @@ void print_lcd_started()
 {
     lcd_clear();
     lcd.write("Started!");
+    lcd.write(254); // move cursor to beginning of first line
+    lcd.write(128);
+    // TODO: Print IP.
 }
 
 void print_lcd_temperature_buf(int i)
@@ -530,8 +743,6 @@ void lcd_button_state_change()
         return;
     }
 
-    lcd_both_buttons_start = millis();
-
     if (millis() - lcd_last_page_switch > 500)
     {
         if (up_button.isPressed())
@@ -557,8 +768,6 @@ void lcd_button_state_change()
         lcd_start_index = max(0, lcd_start_index);
         lcd_start_index %= ctx.count;
 
-        lcd_last_page_switch = millis();
-
         print_lcd_temperatures();
     }
 }
@@ -566,6 +775,22 @@ void lcd_button_state_change()
 void set_error(const char *error)
 {
     // TODO: Set error stuff. Turn on LED, show LCD message.
+}
+
+void read_temp_sensors()
+{
+    sensors.requestTemperatures();
+    Serial.println();
+
+    for (int i = 0; i < ctx.count; i++)
+    {
+        ctx.temps[i].temp = sensors.getTempC(ctx.temps[i].addr);
+        print_sensor(i, &ctx.temps[i], 0, 1);
+    }
+
+    last_temp_read = millis();
+
+    print_lcd_temperatures();
 }
 
 void setup()
@@ -626,18 +851,8 @@ void loop()
 
     if ((millis() - last_temp_read) > READ_DELAY)
     {
-        sensors.requestTemperatures();
-        Serial.println();
-
-        for (int i = 0; i < ctx.count; i++)
-        {
-            ctx.temps[i].temp = sensors.getTempC(ctx.temps[i].addr);
-            print_sensor(i, &ctx.temps[i], 0, 1);
-        }
-
+        read_temp_sensors();
         last_temp_read = millis();
-
-        print_lcd_temperatures();
     }
 
     #ifdef PANNAN_CLIENT

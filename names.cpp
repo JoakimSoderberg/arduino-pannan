@@ -1,13 +1,13 @@
 #include "pannan.h"
 #include <EEPROM.h>
 
-void print_address(DeviceAddress address)
+void print_address(Print &c, DeviceAddress addr)
 {
     for (uint8_t i = 0; i < ADDR_SIZE; i++)
     {
         // zero pad the address if necessary
-        if (address[i] < 16) Serial.print("0");
-        Serial.print(address[i], HEX);
+        if (addr[i] < 16) c.print("0");
+        c.print(addr[i], HEX);
     }
 }
 
@@ -160,7 +160,7 @@ void eeprom_list_names()
         Serial.print(i);
         Serial.print(";");
 
-        print_address(sensors[i].addr);
+        print_address(Serial, sensors[i].addr);
 
         Serial.print(";");
         Serial.println(sensors[i].name);
