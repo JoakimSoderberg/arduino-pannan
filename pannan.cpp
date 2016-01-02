@@ -186,18 +186,107 @@ void print_address_json(EthernetClient *c, TempSensor *s)
     }
 }
 
+char *get_address_str(char *buf, DeviceAddress *addr)
+{
+    uint8_t j = 0;
+    uint8_t step;
+
+    for (uint8_t i = 0; i < ADDR_SIZE; i++)
+    {
+        step = 2;
+
+        // zero pad the address if necessary
+        if ((*addr)[i] < 16)
+        {
+            buf[j++] = '0';
+            step--;
+        }
+
+        // avr version does not have 0 padding...
+        sprintf(&buf[j], "%X", (*addr)[i]);
+
+        j += step;
+    }
+
+    return buf;
+}
+
+#define SENSOR_JSON_FMT         \
+    "    {\n"                   \
+    "      \"name\": \"%s\",\n" \
+    "      \"index\": %d,\n"    \
+    "      \"addr\": \"%s\",\n" \
+    "      \"temp\": %s\n"      \
+    "    }"
+
+char *get_sensor_json(char *buf, int i, TempSensor *s)
+{
+    char addrbuf[ADDR_SIZE * 2 + 1];
+    char str_temp[6];
+    dtostrf(s->temp, 2, 2, str_temp);
+
+    sprintf(buf, SENSOR_JSON_FMT,
+            s->name, i, get_address_str(addrbuf, &s->addr), str_temp);
+
+    return buf;
+}
+
+char *get_http_request_json()
+{
+    int offset = 0;
+    #define REQ_JSON_HEADER \
+        "{\n"               \
+        "  \"sensors\":\n"  \
+        "  [\n"
+
+    #define REQ_JSON_FOOTER \
+        "  ]\n"             \
+        "}\n"
+
+    // NOTE: If ctx.count > 12 this will be too much memory.
+    int alloc_size = (ctx.count * 
+        (MAX_NAME_LEN + (ADDR_SIZE * 2) + sizeof("-##.##")))
+        + sizeof(SENSOR_JSON_FMT)
+        + sizeof(REQ_JSON_HEADER) + 32 + sizeof(REQ_JSON_FOOTER);
+
+    Serial.print("Alloc size: ");
+    Serial.println(alloc_size);
+
+    // Guestimate the needed buffer size.
+    char *s = (char *)malloc(alloc_size);
+
+    if (!s)
+    {
+        s = (char *)malloc(32);
+        strcpy(s, "{\n\"error\": \"Out of memory\"\n}");
+        return s;
+    }
+
+    strcpy(s, REQ_JSON_HEADER);
+    offset += strlen(s);
+
+    for (int i = 0; i < ctx.count; i++)
+    {
+        get_sensor_json(&s[offset], i, &ctx.temps[i]);
+        offset += strlen(&s[offset]);
+        sprintf(&s[offset], "%s\n", (i != (ctx.count - 1)) ? "," : "");
+    }
+
+    strcat(s, REQ_JSON_FOOTER);
+}
+
 void print_sensor_json(EthernetClient *c, int i, TempSensor *s)
 {
-    c->println("    {");
-    c->print("      \"name\": \""); c->print(s->name); c->println("\",");
-    c->print("      \"index\": "); c->print(i); c->println(",");
-    c->print("      \"addr\": \""); print_address_json(c, s); c->println("\",");
-    c->print("      \"temp\": "); c->println(s->temp);
-    c->print("    }");
+    char buf[256];
+    c->print(get_sensor_json(buf, i, s));
 }
 
 void print_http_request_json(EthernetClient *c)
 {
+    char *s = get_http_request_json();
+    c->print(s);
+    free(s);
+    #if 0
     c->println("{");
     c->println("  \"sensors\":");
     c->println("  [");
@@ -218,6 +307,7 @@ void print_http_request_json(EthernetClient *c)
 
     c->println("  ]");
     c->println("}");
+    #endif
 }
 
 #ifdef PANNAN_CLIENT
@@ -244,8 +334,23 @@ void http_request()
     {
         Serial.println(F("  Connected..."));
 
-        print_http_request_header();
-        print_http_request_json(&client);
+        // This needs to be allocated so we can calculate
+        // the content-length, which is a HTTP PUT requirement.
+        char *s = get_http_request_json();
+
+        client.println(F("PUT / HTTP/1.1"));
+        client.print(F("Host: "));
+        server_addr.printTo(client);
+        client.println();
+        client.println(F("User-Agent: arduino-ethernet"));
+        client.println(F("Connection: close"));
+        client.println(F("Content-Type: application/json"));
+        client.print("Content-Length: ");
+        client.println(strlen(s));
+        client.println(); // End of header.
+
+        client.print(s);
+        free(s);
 
         while (client.connected())
         {
@@ -492,11 +597,18 @@ void loop()
 
                 if (c == '\n' && blank_line)
                 {
+                    char *s = get_http_request_json();
+                    
                     sclient.println("HTTP/1.1 200 OK");
                     sclient.println("Connection: close");
                     sclient.println("Content-Type: application/json");
+                    sclient.print("Content-Length: ");
+                    sclient.println(strlen(s));
                     sclient.println();
-                    print_http_request_json(&sclient);
+
+                    sclient.print(s);
+                    free(s);
+
                     break;
                 }
 

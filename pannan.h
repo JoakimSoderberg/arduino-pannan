@@ -4,13 +4,14 @@
 
 #include <DallasTemperature.h>
 
-#define MAX_TEMP_SENSORS 16
+#define MAX_TEMP_SENSORS 12
+#define MAX_NAME_LEN 10
 
 #define member_size(type, member) sizeof(((type *)0)->member)
 
 typedef struct TempSensor {
     DeviceAddress addr;
-    char name[16];
+    char name[MAX_NAME_LEN];
     float temp;
 } TempSensor;
 
