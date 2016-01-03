@@ -379,10 +379,11 @@ void send_http_response_header(Print &c,
                             const char *content_type = HTML_CONTENT_TYPE,
                             int end = 1)
 {
-  c.print(F("HTTP/1.1 "));
+  SHTML("HTTP/1.1 ");
   c.println(status);
-  c.print(F("Content-Type: "));
+  SHTML("Content-Type: ");
   c.println(content_type);
+  SHTML("Connection: Closed");
   if (end) c.println();
 }
 
@@ -445,35 +446,22 @@ void server_names_form_reply(Print &c, char *url)
           "</html>");
 }
 
-#define SKIP_UNTIL_NEXT_PARAM(s) \
-    while (*s && (*s != '&') && (*s != '\n')) s++;
-
-int parse_url_params(char *url)
-{
-
-}
+#define IF_PARAM(s, param) if (!strncmp(s, param, sizeof(param) - 1))
 
 void server_editname_form_reply(Print &c, char *url)
 {
-    int i = 0;
+    int i = -1;
     {
-        char *start = url;
-        char *s = start;
-        send_http_response_header(c);
-
-        Serial.println(url);
+        char *s;
+        char delimit[] = "&\n";
+        s = strtok(url, delimit);
 
         while (*s)
         {
-            if (!strncmp(s, "i=", 2))
+            IF_PARAM(s, "i=")
             {
-                s += 2;
-                start = s;
-                //SKIP_UNTIL_NEXT_PARAM(s);
-                while (*s && (*s != '&') && (*s != '\n')) s++;
-                *s = 0;
-                i = atoi(start);
-                //while (*s && (*s != '&') && (*s != '\n')) s++;
+                i = atoi(s);
+                break;
             }
             s++;
         }
@@ -484,6 +472,8 @@ void server_editname_form_reply(Print &c, char *url)
         server_404_reply(c);
         return;
     }
+
+    send_http_response_header(c);
 
     TempSensor *s = &ctx.temps[i];
 
@@ -513,12 +503,51 @@ void server_editname_form_reply(Print &c, char *url)
           "</html>");
 }
 
-void server_setname_reply(Print &c, char *url)
+void server_setname_reply(Print &c, char *url, char *post)
 {
-    server_unsupported_reply(c);
+    int i = 0;
+    char name[MAX_NAME_LEN] = { 0 };
+    {
+        char *s;
+        char delimit[] = "&\n";
+        s = strtok(post, delimit);
+
+        while (*s)
+        {
+            IF_PARAM(s, "i=")
+            {
+                i = atoi(s);
+            }
+
+            IF_PARAM(s, "name=")
+            {
+                char *it = s;
+                while (*it)
+                {
+                    if (*it == '+')
+                        *it = ' ';
+                    it++;
+                }
+                strncpy(name, s, sizeof(name) - 1);
+            }
+            s++;
+        }
+    }
+
+    if ((i < 0) || (i >= ctx.count) || (strlen(name) <= 0))
+    {
+        server_404_reply(c);
+        return;
+    }
+
+    TempSensor *s = &ctx.temps[i];
+    eeprom_add_name(s->addr, name);
+
+    send_http_response_header(c, "303 See other", HTML_CONTENT_TYPE, 0);
+    SHTML("Location: /names");
 }
 
-char *server_get_url(int i, char *buf, int bufsize)
+char *server_get_query_string(int i, char *buf, int bufsize)
 {
     char *url = &buf[i];
     while ((i < (bufsize - 1)) && buf[i] != ' ')
@@ -570,13 +599,13 @@ void feed_server()
                         if (!strncmp(&buf[i], "GET ", 4))
                         {
                             i += 4;
-                            url = server_get_url(i, buf, sizeof(buf));
+                            url = server_get_query_string(i, buf, sizeof(buf));
                             method = GET;
                         }
                         else if (!strncmp(&buf[i], "POST ", 5))
                         {
                             i += 5;
-                            url = server_get_url(i, buf, sizeof(buf));
+                            url = server_get_query_string(i, buf, sizeof(buf));
                             method = POST;
                         }
                     }
@@ -594,10 +623,6 @@ void feed_server()
                         else if (!strncmp(url, "/editname?", 10))
                         {
                             server_editname_form_reply(sclient, url + 10);
-                        }
-                        else if (!strncmp(url, "/setname", 8))
-                        {
-                            server_setname_reply(sclient, url);
                         }
                         else
                         {
@@ -617,9 +642,14 @@ void feed_server()
                                 buf[j++] = c;
                         }
 
-                        post = server_get_url(0, buf, sizeof(buf));
+                        post = server_get_query_string(0, buf, sizeof(buf));
                         Serial.print(F("Post:"));
                         Serial.println(post);
+
+                        if (!strncmp(url, "/setname?", 9))
+                        {
+                            server_setname_reply(sclient, url, post);
+                        }
                         goto end;
                     }
                     else

@@ -28,11 +28,11 @@ int parse_1wire_address(const char *addr_str, DeviceAddress addr)
 
     if (strlen(s) != ADDR_SIZE * 2)
     {
-        Serial.print("\n\nAddress ");
+        Serial.print(F("\n\nAddress "));
         Serial.print(s);
-        Serial.print(" must be ");
+        Serial.print(F(" must be "));
         Serial.print(ADDR_SIZE * 2);
-        Serial.println(" characters long");
+        Serial.println(F(" characters long"));
         goto fail;
     }
 
