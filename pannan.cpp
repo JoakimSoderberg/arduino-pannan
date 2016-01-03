@@ -315,14 +315,18 @@ int http_request()
         int end;
         Serial.println(F("  Connected..."));
 
-        client.println(F("PUT / HTTP/1.1"));
+        client.println(F("PUT / HTTP/1.1\r\n"
+                         "User-Agent: arduino-ethernet\r\n"
+                         "Connection: close\r\n"
+                         "Content-Type: application/json\r\n"
+                         "Transfer-Encoding: chunked\r\n"));
         client.print(F("Host: "));
-        client.println(server_hostname);
-        client.println(F("User-Agent: arduino-ethernet"));
-        client.println(F("Connection: close"));
-        client.println(F("Content-Type: application/json"));
-        client.println(F("Transfer-Encoding: chunked"));
+        client.print(server_hostname);
+        client.print(":");
+        client.print(server_port);
         client.println(); // End of header.
+
+        // This must be sent as chunked!
         print_http_request_json(client);
         client.println("0\r\n"); // End of chunked message.
 
@@ -369,10 +373,11 @@ int http_request()
 
 #define HTML_OK "200 OK"
 #define HTML_CONTENT_TYPE "text/html; charset=utf-8"
-#define HTML_BODY_START() SHTML( \
-    "<html>"              \
-    "<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'>" \
-    "<body>")
+
+const char HTML_BODY_START[] PROGMEM = 
+    "<html>"
+    "<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'>"
+    "<body>";
 
 void send_http_response_header(Print &c,
                             const char *status = HTML_OK,
@@ -414,7 +419,7 @@ void server_home_reply(Print &c, char *url)
     send_http_response_header(c, HTML_OK, HTML_CONTENT_TYPE, 0);
     c.println(F("Refresh: 10"));    
     c.println();
-    HTML_BODY_START();
+    c.println(FS(HTML_BODY_START));
     SHTML("<div class='container'>");
 
     for (int i = 0; i < ctx.count; i++)
@@ -441,7 +446,7 @@ void server_names_form_reply(Print &c, char *url)
     TempSensor *s;
     send_http_response_header(c);
 
-    HTML_BODY_START();
+    c.println(FS(HTML_BODY_START));
     SHTML("<h1>Sensor names</h1>"
           "<table class='table'>"
           "<tr><th>Index</th><th>Address</th><th>Name</th></tr>");
@@ -504,7 +509,7 @@ void server_editname_form_reply(Print &c, char *url)
 
     TempSensor *s = &ctx.temps[i];
 
-    HTML_BODY_START();
+    c.println(FS(HTML_BODY_START));
     SHTML("<form action='/setname' method='post'>"
           "<h1>Edit sensor</h1>"
           "<table class='table'>");
@@ -886,7 +891,6 @@ void setup()
 
     prepare_sensors();
 
-    delay(5000);
     Serial.println(F("Start Ethernet..."));
 
     // Initiate DHCP request for IP.
@@ -904,7 +908,6 @@ void setup()
 
     #ifdef PANNAN_SERVER
     server.begin();
-    delay(5000);
     #endif
 
     print_lcd_started();
