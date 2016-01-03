@@ -368,7 +368,6 @@ int http_request()
 
 #ifdef PANNAN_SERVER
 
-#define CHTML(str) client.print(F(str))
 #define SHTML(str) c.print(F(str))
 
 #define HTML_OK "200 OK"
@@ -378,6 +377,10 @@ const char HTML_BODY_START[] PROGMEM =
     "<html>"
     "<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'>"
     "<body>";
+
+const char HTML_BODY_END[] PROGMEM =
+    "</body>"
+    "</html>";
 
 void send_http_response_header(Print &c,
                             const char *status = HTML_OK,
@@ -437,8 +440,7 @@ void server_home_reply(Print &c, char *url)
     }
 
     SHTML("</div>");
-    SHTML("</body>"
-          "</html>");
+    c.println(FS(HTML_BODY_END));
 }
 
 void server_names_form_reply(Print &c, char *url)
@@ -470,9 +472,8 @@ void server_names_form_reply(Print &c, char *url)
     }
 
     SHTML("</table>"
-          "</form>"
-          "</body>"
-          "</html>");
+          "</form>");
+    c.println(FS(HTML_BODY_END));
 }
 
 #define IF_PARAM(s, param)                      \
@@ -534,9 +535,8 @@ void server_editname_form_reply(Print &c, char *url)
           "<input type='hidden' name='i' value='");
     c.print(i);
     SHTML("'/>"
-          "</form>"
-          "</body>"
-          "</html>");
+          "</form>");
+    c.println(FS(HTML_BODY_END));
 }
 
 void server_setname_reply(Print &c, char *url, char *post)
