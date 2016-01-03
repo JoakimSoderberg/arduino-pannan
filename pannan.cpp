@@ -120,7 +120,7 @@ void prepare_sensors()
     Serial.print(ctx.count, DEC);
     Serial.println(" devices.");
 
-    Serial.println(F("Get device names from EEPROM..."));
+    //Serial.println(F("Get device names from EEPROM..."));
     eeprom_read_temp_sensors(names, &name_count);
     delay(5000);
 
@@ -128,7 +128,7 @@ void prepare_sensors()
     {
         if (!sensors.getAddress(ctx.temps[i].addr, i))
         {
-            Serial.print(F("ERROR getting address for sensor at index "));
+            //Serial.print(F("ERROR getting address for sensor at index "));
             Serial.println(i);
         }
         else
@@ -163,14 +163,14 @@ void feed_dhcp()
             Serial.println(F("ERROR: DHCP renewed fail"));
             break;
         case 2:
-            Serial.println(F("Renew success"));
+            //Serial.println(F("Renew success"));
             print_ip(Ethernet.localIP());
             break;
         case 3:
-            Serial.println(F("Error: rebind fail"));
+            //Serial.println(F("Error: rebind fail"));
             break;
         case 4:
-            Serial.println(F("Rebind success"));
+            //Serial.println(F("Rebind success"));
             print_ip(Ethernet.localIP());
             break;
 
@@ -242,8 +242,8 @@ char *get_http_request_json()
         + sizeof(SENSOR_JSON_FMT)
         + sizeof(REQ_JSON_HEADER) + 32 + sizeof(REQ_JSON_FOOTER);
 
-    Serial.print("Alloc size: ");
-    Serial.println(alloc_size);
+    //Serial.print("Alloc size: ");
+    //Serial.println(alloc_size);
 
     // Guestimate the needed buffer size.
     char *s = (char *)malloc(alloc_size);
@@ -351,13 +351,13 @@ int http_request()
         status_code = get_http_status_code(buf, sizeof(buf));
 
         client.stop();
-        Serial.print("Status code: ");
+        Serial.print("Status: ");
         Serial.println(status_code);
-        Serial.println(F("  Disconnected"));
+        //Serial.println(F("  Disconnected"));
     }
     else
     {
-        Serial.print(F("Connection failed: "));
+        Serial.print(F("Connect fail: "));
         Serial.println(ret);
         client.stop();
     }
@@ -373,6 +373,10 @@ int http_request()
 
 #define HTML_OK "200 OK"
 #define HTML_CONTENT_TYPE "text/html; charset=utf-8"
+#define HTML_BODY_START() SHTML( \
+    "<html>"              \
+    "<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css'>" \
+    "<body>")
 
 void send_http_response_header(Print &c,
                             const char *status = HTML_OK,
@@ -383,7 +387,6 @@ void send_http_response_header(Print &c,
   c.println(status);
   SHTML("Content-Type: ");
   c.println(content_type);
-  SHTML("Connection: Closed");
   if (end) c.println();
 }
 
@@ -411,15 +414,42 @@ void server_json_reply(Print &c, char *url)
     free(s);
 }
 
+void server_home_reply(Print &c, char *url)
+{
+    TempSensor *s;
+    char str_temp[6];
+
+    send_http_response_header(c);
+    HTML_BODY_START();
+    SHTML("<div class='container'>");
+
+    for (int i = 0; i < ctx.count; i++)
+    {
+        s = &ctx.temps[i];
+        SHTML("<div class='row'>");
+        SHTML("<div class='col-md-1'><strong>");
+        c.print(s->name);
+        SHTML("</strong></div>");
+        SHTML("<div class='col-md-1'>");
+        dtostrf(s->temp, 2, 2, str_temp);
+        c.print(str_temp);
+        SHTML("C</div>");
+        SHTML("</div><br>");
+    }
+
+    SHTML("</div>");
+    SHTML("</body>"
+          "</html>");
+}
+
 void server_names_form_reply(Print &c, char *url)
 {
     TempSensor *s;
     send_http_response_header(c);
 
-    SHTML("<html>"
-          "<body>"
-          "<h1>Sensor names</h1>"
-          "<table>"
+    HTML_BODY_START();
+    SHTML("<h1>Sensor names</h1>"
+          "<table class='table'>"
           "<tr><th>Index</th><th>Address</th><th>Name</th></tr>");
     
     for (int i = 0; i < ctx.count; i++)
@@ -434,7 +464,7 @@ void server_names_form_reply(Print &c, char *url)
         c.print(s->name);
         SHTML("</td><td>");
         SHTML("<form action='editname' method='get'>"
-              "<input type='submit' value='Edit' />"
+              "<input class='btn btn-link' type='submit' value='Edit' />"
               "<input type='hidden' name='i' value='");
         c.print(i);
         SHTML("'/></form></td></tr>");
@@ -446,7 +476,9 @@ void server_names_form_reply(Print &c, char *url)
           "</html>");
 }
 
-#define IF_PARAM(s, param) if (!strncmp(s, param, sizeof(param) - 1))
+#define IF_PARAM(s, param)                      \
+    if (!strncmp(s, param, sizeof(param) - 1)   \
+        && (s += (sizeof(param) - 1)))
 
 void server_editname_form_reply(Print &c, char *url)
 {
@@ -456,14 +488,15 @@ void server_editname_form_reply(Print &c, char *url)
         char delimit[] = "&\n";
         s = strtok(url, delimit);
 
-        while (*s)
+        while (s)
         {
             IF_PARAM(s, "i=")
             {
                 i = atoi(s);
                 break;
             }
-            s++;
+
+            s = strtok(NULL, delimit);
         }
     }
 
@@ -477,27 +510,31 @@ void server_editname_form_reply(Print &c, char *url)
 
     TempSensor *s = &ctx.temps[i];
 
-    SHTML("<html>"
-          "<body>"
-          "<h1>Edit sensor name</h1>"
-          "<table>");
+    HTML_BODY_START();
+    SHTML("<form action='/setname' method='post'>"
+          "<h1>Edit sensor</h1>"
+          "<table class='table'>");
 
-    //      "<tr><th>Index</th><th>Address</th><th>Name</th></tr>");
-    SHTML("<tr><th>Index:</th><td>");
+    SHTML("<tr><th>Index</th><td>");
     c.print(i);
     SHTML("</td></tr>");
 
-    SHTML("<tr><th>Address:</th><td>");
+    SHTML("<tr><th>Address</th><td>");
     print_address(c, s->addr);
     SHTML("</td></tr>");
 
-    SHTML("<tr><th>Name:</th><td>"
-          "<form action='/setname'>"
-          "<input type='text' value='");
+    SHTML("<tr><th>Name</th><td>"
+          "<input type='text' name='name' value='");
     c.print(s->name);
     SHTML("'/></td></tr>");
 
     SHTML("</table>"
+          "<br/>"
+          "<input class='btn btn-primary' type='submit' value='Save' />"
+          "<a class='btn btn-link' href='/names'>Cancel</a>"
+          "<input type='hidden' name='i' value='");
+    c.print(i);
+    SHTML("'/>"
           "</form>"
           "</body>"
           "</html>");
@@ -505,14 +542,14 @@ void server_editname_form_reply(Print &c, char *url)
 
 void server_setname_reply(Print &c, char *url, char *post)
 {
-    int i = 0;
+    int i = -1;
     char name[MAX_NAME_LEN] = { 0 };
     {
         char *s;
         char delimit[] = "&\n";
         s = strtok(post, delimit);
 
-        while (*s)
+        while (s)
         {
             IF_PARAM(s, "i=")
             {
@@ -530,27 +567,33 @@ void server_setname_reply(Print &c, char *url, char *post)
                 }
                 strncpy(name, s, sizeof(name) - 1);
             }
-            s++;
+
+            s = strtok(NULL, delimit);
         }
     }
 
     if ((i < 0) || (i >= ctx.count) || (strlen(name) <= 0))
     {
-        server_404_reply(c);
+        Serial.println(F("Invalid params setname"));
+        send_http_response_header(c, "400 Bad request");
+        SHTML("<html>400 Bad request</html>");
         return;
     }
 
     TempSensor *s = &ctx.temps[i];
+    strcpy(s->name, name);
     eeprom_add_name(s->addr, name);
 
+    Serial.println(F("Sending response 303"));
     send_http_response_header(c, "303 See other", HTML_CONTENT_TYPE, 0);
     SHTML("Location: /names");
+    c.println();
 }
 
 char *server_get_query_string(int i, char *buf, int bufsize)
 {
     char *url = &buf[i];
-    while ((i < (bufsize - 1)) && buf[i] != ' ')
+    while ((i < (bufsize - 1)) && buf[i] != ' ' && buf[i] != '\n')
         i++;
     buf[i] = 0;
 
@@ -573,7 +616,7 @@ void feed_server()
             POST
         } method_type_t;
         method_type_t method = UNSUPPORTED;
-        Serial.println(F("New client"));
+        //Serial.println(F("New client"));
 
         // A HTTP request ends with a blank line.
         boolean blank_line = true;
@@ -612,7 +655,11 @@ void feed_server()
 
                     if (method == GET)
                     {
-                        if (!strcmp(url, "/") || !strncmp(url, "/json", 5))
+                        if (!strcmp(url, "/"))
+                        {
+                            server_home_reply(sclient, url + 1);
+                        }
+                        else if (!strncmp(url, "/json", 5))
                         {
                             server_json_reply(sclient, url);
                         }
@@ -632,6 +679,7 @@ void feed_server()
                     else if (method == POST)
                     {
                         char *post;
+                        url = strdup(url);
                         j = 0;
                         while (sclient.available())
                         {
@@ -643,13 +691,14 @@ void feed_server()
                         }
 
                         post = server_get_query_string(0, buf, sizeof(buf));
-                        Serial.print(F("Post:"));
+                        Serial.print(F("\nPost:"));
                         Serial.println(post);
 
-                        if (!strncmp(url, "/setname?", 9))
+                        if (!strncmp(url, "/setname", 8))
                         {
-                            server_setname_reply(sclient, url, post);
+                            server_setname_reply(sclient, url + 8, post);
                         }
+                        free(url);
                         goto end;
                     }
                     else
@@ -678,7 +727,7 @@ void feed_server()
         // Give the web browser time to receive the data
         delay(1);
         sclient.stop();
-        Serial.println(F("Client disconnected"));
+        //Serial.println(F("Client disconnected"));
     }
 }
 
@@ -848,14 +897,14 @@ void setup()
     // Initiate DHCP request for IP.
     if (Ethernet.begin(mac) == 0)
     {
-        Serial.println(F("Failed to configure Ethernet using DHCP..."));
+        //Serial.println(F("Failed to configure Ethernet using DHCP..."));
         while (Ethernet.begin(mac) == 0)
         {
             delay(READ_DELAY);
         }
     }
 
-    Serial.println(F("DHCP request successful"));
+    //Serial.println(F("DHCP request successful"));
     print_ip(Ethernet.localIP());
 
     #ifdef PANNAN_SERVER

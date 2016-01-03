@@ -128,14 +128,14 @@ void eeprom_add_name(DeviceAddress addr, const char *name)
     if ((i = eeprom_find_address(temps, temp_count, addr, NULL, 0)) < 0)
     {
         i = temp_count; // Address not found so append.
-        Serial.print(F(" Address not found, appending to index "));
+        //Serial.print(" Address not found, appending to index ");
     }
     else
     {
-        Serial.print(F(" Adding address to index "));
+        //Serial.print(" Adding address to index ");
     }
 
-    Serial.println(i);
+    //Serial.println(i);
 
     eeprom_set_name(i, addr, name);
 }
@@ -149,9 +149,9 @@ void eeprom_list_names()
 
     eeprom_read_temp_sensors(sensors, &count);
 
-    Serial.print("OK ");
-    Serial.print(count);
-    Serial.println(F(" found"));
+    //Serial.print("OK ");
+    //Serial.print(count);
+    //Serial.println(F(" found"));
     Serial.println(F(" Index;Address;Name"));
 
     for (i = 0; i < count; i++)
