@@ -37,6 +37,13 @@ void __cxa_pure_virtual(void)
 {
 }
 
+//
+// Helper to reuse the same flash string.
+//  const char MyText[] PROGMEM  = { "My flash based text" };
+//  Serial.println(FS(MyText));
+//
+#define FS(x) (__FlashStringHelper*)(x)
+
 #define ONE_WIRE_BUS 2
 #define TEMPERATURE_PRECISION 12
 
@@ -53,7 +60,7 @@ int lcd_scroll_enabled = 1;
 #define READ_DELAY 5000
 
 // Attach the serial display's RX line to digital pin 3
-SoftwareSerial lcd(4,3); // pin 3 = TX, pin 4 = RX (unused)
+SoftwareSerial lcd(4,3); // pin 4 = RX (unused), pin 3 = TX
 
 byte mac[] = { 0xDE, 0x01, 0xBE, 0x3E, 0x21, 0xED };
 
@@ -67,7 +74,7 @@ DallasTemperature sensors(&oneWire);
 
 // This is used to do HTTP PUT of the json to a specified server.
 EthernetClient client;
-char server_hostname[32] = "higgs";
+char server_hostname[16] = "higgs";
 int server_port = HTTP_REQUEST_PORT_DEFAULT;
 int http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
 unsigned long last_http_request = 0;
@@ -111,8 +118,6 @@ void prepare_sensors()
     // Locate devices on the bus
     sensors.begin();
 
-    delay(5000);
-
     ctx.count = sensors.getDeviceCount();
 
     Serial.print(F("Locating devices..."));
@@ -122,7 +127,6 @@ void prepare_sensors()
 
     //Serial.println(F("Get device names from EEPROM..."));
     eeprom_read_temp_sensors(names, &name_count);
-    delay(5000);
 
     for (i = 0; i < ctx.count; i++)
     {
@@ -211,11 +215,14 @@ char *get_address_str(char *buf, DeviceAddress *addr)
     "      \"addr\": \"%s\",\n" \
     "      \"temp\": %s\n"      \
     "    }"
+#define SENSOR_ADDR_SIZE (ADDR_SIZE * 2 + 1)
+#define SENSOR_TEMP_SIZE 6
+#define SENSOR_BUF_SIZE (sizeof(SENSOR_JSON_FMT) + SENSOR_ADDR_SIZE + SENSOR_TEMP_SIZE)
 
 char *get_sensor_json(char *buf, int i, TempSensor *s)
 {
-    char addrbuf[ADDR_SIZE * 2 + 1];
-    char str_temp[6];
+    char addrbuf[SENSOR_ADDR_SIZE];
+    char str_temp[SENSOR_TEMP_SIZE];
     dtostrf(s->temp, 2, 2, str_temp);
 
     sprintf(buf, SENSOR_JSON_FMT,
@@ -224,58 +231,53 @@ char *get_sensor_json(char *buf, int i, TempSensor *s)
     return buf;
 }
 
-char *get_http_request_json()
+char *dec2hex(int a)
 {
-    int offset = 0;
-    #define REQ_JSON_HEADER \
-        "{\n"               \
-        "  \"sensors\":\n"  \
-        "  [\n"
+    static char buf[4];
+    sprintf(buf, "%x", a);
+    return buf;
+}
 
-    #define REQ_JSON_FOOTER \
-        "  ]\n"             \
-        "}\n"
+void print_sensor_json(Print &c, int i, TempSensor *s)
+{
+    char buf[SENSOR_BUF_SIZE];
+    char *str = get_sensor_json(buf, i, s);
+    c.println(dec2hex(strlen(str)));
+    c.println(str);
+}
 
-    // NOTE: If ctx.count > 12 this will be too much memory.
-    int alloc_size = (ctx.count * 
-        (MAX_NAME_LEN + (ADDR_SIZE * 2) + sizeof("-##.##")))
-        + sizeof(SENSOR_JSON_FMT)
-        + sizeof(REQ_JSON_HEADER) + 32 + sizeof(REQ_JSON_FOOTER);
+#define PRINT_CHUNK(str)                        \
+    do                                          \
+    {                                           \
+        c.println(dec2hex(sizeof(str) - 1));    \
+        c.println(F(str));                      \
+    } while (0)
 
-    //Serial.print("Alloc size: ");
-    //Serial.println(alloc_size);
-
-    // Guestimate the needed buffer size.
-    char *s = (char *)malloc(alloc_size);
-
-    if (!s)
-    {
-        s = (char *)malloc(32);
-        strcpy(s, "{\n\"error\": \"Out of memory\"\n}");
-        return s;
-    }
-
-    strcpy(s, REQ_JSON_HEADER);
-    offset += strlen(s);
-
+//
+// Note! This must be sent with header Transfer-Encoding: chunked
+//
+void print_http_request_json(Print &c)
+{
+    PRINT_CHUNK("{\n" \
+                "  \"sensors\":\n"
+                "  [\n");
+    
     for (int i = 0; i < ctx.count; i++)
     {
-        get_sensor_json(&s[offset], i, &ctx.temps[i]);
-        offset += strlen(&s[offset]);
-
+        print_sensor_json(c, i, &ctx.temps[i]);
+        
         if (i != (ctx.count - 1))
         {
-            strcat(&s[offset], ",\n");
-            offset += 2;
+            PRINT_CHUNK(",\n");
         }
         else
         {
-            strcat(&s[offset], "\n");
-            offset++;
+            PRINT_CHUNK("\n");
         }
     }
 
-    strcat(s, REQ_JSON_FOOTER);
+    PRINT_CHUNK("  ]\n"
+                "}\n");
 }
 
 #ifdef PANNAN_CLIENT
@@ -313,22 +315,16 @@ int http_request()
         int end;
         Serial.println(F("  Connected..."));
 
-        // This needs to be allocated so we can calculate
-        // the content-length, which is a HTTP PUT requirement.
-        char *s = get_http_request_json();
-
         client.println(F("PUT / HTTP/1.1"));
         client.print(F("Host: "));
         client.println(server_hostname);
         client.println(F("User-Agent: arduino-ethernet"));
         client.println(F("Connection: close"));
         client.println(F("Content-Type: application/json"));
-        client.print(F("Content-Length: "));
-        client.println(strlen(s));
+        client.println(F("Transfer-Encoding: chunked"));
         client.println(); // End of header.
-
-        client.print(s);
-        free(s);
+        print_http_request_json(client);
+        client.println("0\r\n"); // End of chunked message.
 
         char buf[16];
         memset(buf, 0, sizeof(buf));
@@ -403,15 +399,11 @@ void server_unsupported_reply(Print &c)
 
 void server_json_reply(Print &c, char *url)
 {
-    char *s = get_http_request_json();
-
     send_http_response_header(c, HTML_OK, "application/json", 0);
-    c.print("Content-Length: ");
-    c.println(strlen(s));
+    c.println(F("Transfer-Encoding: chunked"));
     c.println();
-
-    c.print(s);
-    free(s);
+    print_http_request_json(c);
+    c.println("0\r\n");
 }
 
 void server_home_reply(Print &c, char *url)
@@ -419,7 +411,9 @@ void server_home_reply(Print &c, char *url)
     TempSensor *s;
     char str_temp[6];
 
-    send_http_response_header(c);
+    send_http_response_header(c, HTML_OK, HTML_CONTENT_TYPE, 0);
+    c.println(F("Refresh: 10"));    
+    c.println();
     HTML_BODY_START();
     SHTML("<div class='container'>");
 
@@ -606,7 +600,7 @@ void feed_server()
 
     if (sclient)
     {
-        char buf[64];
+        char buf[32];
         char *url = NULL;
         int j = 0;
         typedef enum method_type_e
@@ -679,6 +673,7 @@ void feed_server()
                     else if (method == POST)
                     {
                         char *post;
+                        // TODO: Get rid of this...
                         url = strdup(url);
                         j = 0;
                         while (sclient.available())
