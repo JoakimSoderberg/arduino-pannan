@@ -443,6 +443,8 @@ void server_home_reply(Print &c, char *url)
     c.println(FS(HTML_BODY_END));
 }
 
+const char TD_STARTEND[] PROGMEM = "</td><td>";
+
 void server_names_form_reply(Print &c, char *url)
 {
     TempSensor *s;
@@ -459,11 +461,11 @@ void server_names_form_reply(Print &c, char *url)
 
         SHTML("<tr><td>");
         c.print(i);
-        SHTML("</td><td>");
+        c.println(FS(TD_STARTEND)); // </td><td>
         print_address(c, s->addr);
-        SHTML("</td><td>");
+        c.println(FS(TD_STARTEND));
         c.print(s->name);
-        SHTML("</td><td>");
+        c.println(FS(TD_STARTEND));
         SHTML("<form action='editname' method='get'>"
               "<input class='btn btn-link' type='submit' value='Edit' />"
               "<input type='hidden' name='i' value='");
@@ -479,6 +481,8 @@ void server_names_form_reply(Print &c, char *url)
 #define IF_PARAM(s, param)                      \
     if (!strncmp(s, param, sizeof(param) - 1)   \
         && (s += (sizeof(param) - 1)))
+
+const char TD_TR[] PROGMEM = "</td><tr>";
 
 void server_editname_form_reply(Print &c, char *url)
 {
@@ -517,16 +521,16 @@ void server_editname_form_reply(Print &c, char *url)
 
     SHTML("<tr><th>Index</th><td>");
     c.print(i);
-    SHTML("</td></tr>");
+    c.println(FS(TD_TR)); // </td></tr>
 
     SHTML("<tr><th>Address</th><td>");
     print_address(c, s->addr);
-    SHTML("</td></tr>");
+    c.println(FS(TD_TR));
 
     SHTML("<tr><th>Name</th><td>"
           "<input type='text' name='name' value='");
     c.print(s->name);
-    SHTML("'/></td></tr>");
+    c.println(FS(TD_TR));
 
     SHTML("</table>"
           "<br/>"
@@ -573,7 +577,7 @@ void server_setname_reply(Print &c, char *url, char *post)
 
     if ((i < 0) || (i >= ctx.count) || (strlen(name) <= 0))
     {
-        Serial.println(F("Invalid params setname"));
+        //Serial.println(F("Invalid params setname"));
         send_http_response_header(c, "400 Bad request");
         SHTML("<html>400 Bad request</html>");
         return;
@@ -583,7 +587,6 @@ void server_setname_reply(Print &c, char *url, char *post)
     strcpy(s->name, name);
     eeprom_add_name(s->addr, name);
 
-    Serial.println(F("Sending response 303"));
     send_http_response_header(c, "303 See other", HTML_CONTENT_TYPE, 0);
     SHTML("Location: /names");
     c.println();
@@ -615,6 +618,7 @@ void feed_server()
             POST
         } method_type_t;
         method_type_t method = UNSUPPORTED;
+
         //Serial.println(F("New client"));
 
         // A HTTP request ends with a blank line.
@@ -703,7 +707,7 @@ void feed_server()
                     }
                     else
                     {
-                        Serial.println(F("Unsupported method"));
+                        //Serial.println(F("Unsupported method"));
                         server_unsupported_reply(sclient);
                         goto end;
                     }
