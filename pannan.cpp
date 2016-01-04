@@ -72,11 +72,10 @@ DallasTemperature sensors(&oneWire);
 #define HTTP_REQUEST_PORT_DEFAULT 9000
 #define HTTP_REQUEST_DELAY_DEFAULT 5000
 
+const char DEFAULT_HOSTNAME[] PROGMEM = "higgs";
+
 // This is used to do HTTP PUT of the json to a specified server.
 EthernetClient client;
-char server_hostname[16] = "higgs";
-int server_port = HTTP_REQUEST_PORT_DEFAULT;
-int http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
 unsigned long last_http_request = 0;
 
 #endif // PANNAN_CLIENT
@@ -87,6 +86,11 @@ EthernetServer server(80);
 
 Context ctx;
 unsigned long last_temp_read;
+
+void set_error(const char *error)
+{
+    // TODO: Set error stuff. Turn on LED, show LCD message.
+}
 
 void print_sensor(int i, TempSensor *sensor,
                   byte newline = 1, byte show_temperature = 0)
@@ -306,10 +310,11 @@ int http_request()
     int status_code = 0;
     int ret;
     Serial.print(F("HTTP Client request to "));
-    Serial.println(server_hostname);
+    Serial.println(ctx.settings.server_hostname);
     client.stop();
 
-    if ((ret = client.connect(server_hostname, server_port)))
+    if ((ret = client.connect(ctx.settings.server_hostname,
+                              ctx.settings.server_port)))
     {
         int j = 0;
         int end;
@@ -321,9 +326,9 @@ int http_request()
                          "Content-Type: application/json\r\n"
                          "Transfer-Encoding: chunked\r\n"));
         client.print(F("Host: "));
-        client.print(server_hostname);
+        client.print(ctx.settings.server_hostname);
         client.print(":");
-        client.print(server_port);
+        client.print(ctx.settings.server_port);
         client.println(); // End of header.
 
         // This must be sent as chunked!
@@ -363,6 +368,20 @@ int http_request()
     }
 
     return status_code;
+}
+
+void feed_client()
+{
+    if ((millis() - last_http_request) > ctx.settings.http_request_delay)
+    {
+        int status = http_request();
+        if ((status < 200) && (status >= 300))
+        {
+            set_error("HTTP client fail");
+        }
+
+        last_http_request = millis(); 
+    }
 }
 #endif // PANNAN_CLIENT
 
@@ -530,11 +549,12 @@ void server_editname_form_reply(Print &c, char *url)
     SHTML("<tr><th>Name</th><td>"
           "<input type='text' name='name' value='");
     c.print(s->name);
+    SHTML("'>");
     c.println(FS(TD_TR));
 
     SHTML("</table>"
           "<br/>"
-          "<input class='btn btn-primary' type='submit' value='Save' />"
+          "<input class='btn btn-primary' type='submit' value='Save'>"
           "<a class='btn btn-link' href='/names'>Cancel</a>"
           "<input type='hidden' name='i' value='");
     c.print(i);
@@ -855,31 +875,49 @@ void lcd_button_state_change()
     }
 }
 
-void set_error(const char *error)
+void feed_lcd()
 {
-    // TODO: Set error stuff. Turn on LED, show LCD message.
+    if (lcd_scroll_enabled)
+    {
+        lcd_do_scroll();
+    }
+
+    if (up_button.isPressed() || down_button.isPressed())
+    {
+        lcd_button_state_change();
+    }
 }
 
 void read_temp_sensors()
 {
-    sensors.requestTemperatures();
-    Serial.println();
-
-    for (int i = 0; i < ctx.count; i++)
+    if ((millis() - last_temp_read) > READ_DELAY)
     {
-        ctx.temps[i].temp = sensors.getTempC(ctx.temps[i].addr);
-        print_sensor(i, &ctx.temps[i], 0, 1);
+        sensors.requestTemperatures();
+        Serial.println();
+
+        for (int i = 0; i < ctx.count; i++)
+        {
+            ctx.temps[i].temp = sensors.getTempC(ctx.temps[i].addr);
+            print_sensor(i, &ctx.temps[i], 0, 1);
+        }
+
+        last_temp_read = millis();
+
+        print_lcd_temperatures();
     }
+}
 
-    last_temp_read = millis();
-
-    print_lcd_temperatures();
+void init_default_settings()
+{
+    strncpy_P(ctx.settings.server_hostname,
+              DEFAULT_HOSTNAME, sizeof(ctx.settings.server_hostname) - 1);
+    ctx.settings.server_port = HTTP_REQUEST_PORT_DEFAULT;
+    ctx.settings.http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
+    ctx.settings.http_client_enabled = 1;
 }
 
 void setup()
 {
-    //prepare_sensors();
-
     Serial.begin(9600);
 
     while (!Serial)
@@ -887,16 +925,20 @@ void setup()
         ; // wait for serial port to connect. Needed for native USB
     }
 
-    Serial.println(F("Serial port active..."));
+    init_default_settings();
+
+    //Serial.println(F("Serial port active..."));
 
     lcd.begin(9600);
     delay(500);
-    Serial.println(F("LCD serial active..."));
+    //Serial.println(F("LCD serial active..."));
 
     prepare_sensors();
 
-    Serial.println(F("Start Ethernet..."));
+    //Serial.println(F("Start Ethernet..."));
 
+    // TODO: Don't retry here, add an error state
+    //       and use watchdog timer to reset until we got DHCP
     // Initiate DHCP request for IP.
     if (Ethernet.begin(mac) == 0)
     {
@@ -907,7 +949,6 @@ void setup()
         }
     }
 
-    //Serial.println(F("DHCP request successful"));
     print_ip(Ethernet.localIP());
 
     #ifdef PANNAN_SERVER
@@ -920,32 +961,12 @@ void setup()
 
 void loop()
 {
-    if (lcd_scroll_enabled)
-    {
-        lcd_do_scroll();
-    }
+    feed_lcd();
 
-    if (up_button.isPressed() || down_button.isPressed())
-    {
-        lcd_button_state_change();
-    }
-
-    if ((millis() - last_temp_read) > READ_DELAY)
-    {
-        read_temp_sensors();
-        last_temp_read = millis();
-    }
+    read_temp_sensors();
 
     #ifdef PANNAN_CLIENT
-    if ((millis() - last_http_request) > http_request_delay)
-    {
-        if (http_request() != 200)
-        {
-            set_error("HTTP client fail");
-        }
-
-        last_http_request = millis(); 
-    }
+    feed_client();
     #endif // PANNAN_CLIENT
 
     // Server.
