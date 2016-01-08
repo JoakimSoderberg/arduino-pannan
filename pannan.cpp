@@ -5,7 +5,7 @@
 #include <Ethernet.h>
 #include <SoftwareSerial.h>
 #include <Button.h>
-//#include <HTTPClient.h>
+#include <DS2762.h>
 
 #include "pannan.h"
 #include "names.h"
@@ -67,15 +67,14 @@ byte mac[] = { 0xDE, 0x01, 0xBE, 0x3E, 0x21, 0xED };
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
+
 #ifdef PANNAN_CLIENT
 
 #define HTTP_REQUEST_PORT_DEFAULT 9000
 #define HTTP_REQUEST_DELAY_DEFAULT 5000
-
 const char DEFAULT_HOSTNAME[] PROGMEM = "higgs";
 
 // This is used to do HTTP PUT of the json to a specified server.
-EthernetClient client;
 unsigned long last_http_request = 0;
 
 #endif // PANNAN_CLIENT
@@ -108,7 +107,12 @@ void print_sensor(int i, TempSensor *sensor,
 
     Serial.print(" ");
     Serial.print(sensor->name);
-    Serial.println(" ");
+   
+
+    if (sensor->type == SENSOR_DS2762) 
+        Serial.println(" *");
+    else
+        Serial.println(" ");
 
     if (newline) Serial.println();
 }
@@ -141,7 +145,15 @@ void prepare_sensors()
         }
         else
         {
-            sensors.setResolution(ctx.temps[i].addr, TEMPERATURE_PRECISION);
+            if (sensors.validFamily(ctx.temps[i].addr))
+            {
+                ctx.temps[i].type = SENSOR_DS18B20;
+                sensors.setResolution(ctx.temps[i].addr, TEMPERATURE_PRECISION);
+            }
+            else
+            {
+                ctx.temps[i].type = SENSOR_DS2762;
+            }
 
             if (eeprom_find_address(names, name_count,
                                     ctx.temps[i].addr, // Search for this
@@ -227,7 +239,15 @@ char *get_sensor_json(char *buf, int i, TempSensor *s)
 {
     char addrbuf[SENSOR_ADDR_SIZE];
     char str_temp[SENSOR_TEMP_SIZE];
-    dtostrf(s->temp, 2, 2, str_temp);
+
+    if (s->temp == DEVICE_DISCONNECTED_C)
+    {
+        strcpy(str_temp, "null");
+    }
+    else
+    {
+        dtostrf(s->temp, 2, 2, str_temp);
+    }
 
     sprintf(buf, SENSOR_JSON_FMT,
             s->name, i, get_address_str(addrbuf, &s->addr), str_temp);
@@ -309,9 +329,10 @@ int http_request()
 {
     int status_code = 0;
     int ret;
+    EthernetClient client;
+
     Serial.print(F("HTTP Client request to "));
     Serial.println(ctx.settings.server_hostname);
-    client.stop();
 
     if ((ret = client.connect(ctx.settings.server_hostname,
                               ctx.settings.server_port)))
@@ -452,7 +473,14 @@ void server_home_reply(Print &c, char *url)
         c.print(s->name);
         SHTML("</strong></div>");
         SHTML("<div class='col-md-1'>");
-        dtostrf(s->temp, 2, 2, str_temp);
+        if (s->temp == DEVICE_DISCONNECTED_C)
+        {
+            strcpy(str_temp, "-");
+        }
+        else
+        {
+            dtostrf(s->temp, 2, 2, str_temp);
+        }
         c.print(str_temp);
         SHTML("C</div>");
         SHTML("</div><br>");
@@ -789,8 +817,16 @@ void print_lcd_temperature_buf(int i)
 {
     char buf[16];
     char str_temp[6];
-    dtostrf(ctx.temps[i].temp, 2, 2, str_temp);
-    sprintf(buf, "%-10s%4sC", ctx.temps[i].name, str_temp);
+    TempSensor *s = &ctx.temps[i];
+    if (s->temp == DEVICE_DISCONNECTED_C)
+    {
+        strcpy(str_temp, "-");
+    }
+    else
+    {
+        dtostrf(s->temp, 2, 2, str_temp);
+    }
+    sprintf(buf, "%-10s%4sC", s->name, str_temp);
     lcd.write(buf);
 }
 
@@ -892,13 +928,29 @@ void read_temp_sensors()
 {
     if ((millis() - last_temp_read) > READ_DELAY)
     {
-        sensors.requestTemperatures();
+        TempSensor *s;
+
         Serial.println();
 
+        // We request the temperature by address to each
+        // sensor individually instead of using sensors.requestTemperatures()
+        // since we have a sensor that is not DS18B20 on the bus.
         for (int i = 0; i < ctx.count; i++)
         {
-            ctx.temps[i].temp = sensors.getTempC(ctx.temps[i].addr);
-            print_sensor(i, &ctx.temps[i], 0, 1);
+            s = &ctx.temps[i];
+
+            if (s->type == SENSOR_DS18B20)
+            {
+                sensors.requestTemperaturesByAddress(s->addr);
+                s->temp = sensors.getTempC(s->addr);
+            }
+            else
+            {
+                DS2762 ds(&oneWire, s->addr);
+                s->temp = ds.readADC(); // ds.readTempC();
+            }
+
+            print_sensor(i, s, 0, 1);
         }
 
         last_temp_read = millis();

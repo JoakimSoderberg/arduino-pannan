@@ -55,25 +55,15 @@ generate_arduino_library(Button
     HDRS    ${BUTTON_DIR}/Button.h)
 
 #
-# Button library.
+# DS2762 "High-Precision Li+ Battery Monitor" library.
+# (Used by the thermocouple sensor)
 #
-set(HTTPCLIENT_DIR ${CMAKE_SOURCE_DIR}/HTTPClient)
-include_directories(${HTTPCLIENT_DIR}/src)
+set(DS2762_DIR ${CMAKE_SOURCE_DIR}/DS2762)
+include_directories(${DS2762_DIR}/)
 
-generate_arduino_library(HTTPClient
-    SRCS    ${HTTPCLIENT_DIR}/HTTPClient.cpp
-    HDRS    ${HTTPCLIENT_DIR}/HTTPClient.h)
-
-
-#
-# SoftwareSerial library.
-#
-#set(SOFTWARESERIAL_DIR ${CMAKE_SOURCE_DIR}/SoftwareSerial)
-#include_directories(${SOFTWARESERIAL_DIR}/src)
-
-#generate_arduino_library(SoftwareSerial
-#    SRCS    ${SOFTWARESERIAL_DIR}/SoftwareSerial.cpp
-#    HDRS    ${SOFTWARESERIAL_DIR}/SoftwareSerial.h)
+generate_arduino_library(DS2762
+    SRCS    ${DS2762_DIR}/DS2762.cpp
+    HDRS    ${DS2762_DIR}/DS2762.h)
 
 ##
 ## OneWire library.
@@ -99,9 +89,7 @@ generate_arduino_firmware(pannan
     HDRS pannan.h
     LIBS 
         DallasTemperature
-        HTTPClient
-        #Ethernet
-        #SoftwareSerial
+        DS2762
     PORT /dev/tty.usbserial-A600exfH
     SERIAL picocom @SERIAL_PORT@ --baud 9600 --nolock --echo
     BOARD ethernet)

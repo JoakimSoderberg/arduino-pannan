@@ -9,11 +9,18 @@
 
 #define member_size(type, member) sizeof(((type *)0)->member)
 
+typedef enum sensor_type_e
+{
+	SENSOR_DS18B20,
+	SENSOR_DS2762
+} sensor_type_t;
+
 typedef struct TempSensor
 {
     DeviceAddress addr;
     char name[MAX_NAME_LEN];
     float temp;
+    sensor_type_t type;
 } TempSensor;
 
 #define ADDR_SIZE member_size(TempSensor, addr)
