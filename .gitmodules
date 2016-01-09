@@ -22,3 +22,6 @@
 [submodule "kthermlib"]
 	path = kthermlib
 	url = git@github.com:Miceuz/k-thermocouple-lib.git
+[submodule "MemoryFree"]
+	path = MemoryFree
+	url = git@github.com:McNeight/MemoryFree.git
