@@ -13,9 +13,6 @@
 [submodule "Ethernet"]
 	path = Ethernet
 	url = https://github.com/arduino-libraries/Ethernet.git
-[submodule "HTTPClient"]
-	path = HTTPClient
-	url = git@github.com:interactive-matter/HTTPClient.git
 [submodule "DS2762"]
 	path = DS2762
 	url = git@github.com:nigelb/Arduino-DS2762.git
