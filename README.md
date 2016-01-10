@@ -54,8 +54,7 @@ HELP
 Features
 --------
 
-Webserver
-++++++++
+**Webserver**
 
 * Home screen with all temperatures
 * Edit names of sensors and save them in EEPROM `http://server/names`
