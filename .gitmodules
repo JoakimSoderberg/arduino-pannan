@@ -1,6 +1,6 @@
 [submodule "arduino-cmake"]
 	path = arduino-cmake
-	url = https://github.com/queezythegreat/arduino-cmake.git
+	url = https://github.com/JoakimSoderberg/arduino-cmake.git
 [submodule "DallasTemperature"]
 	path = DallasTemperature
 	url = https://github.com/milesburton/Arduino-Temperature-Control-Library.git
@@ -12,10 +12,10 @@
 	url = https://github.com/arduino-libraries/Ethernet.git
 [submodule "DS2762"]
 	path = DS2762
-	url = git@github.com:nigelb/Arduino-DS2762.git
+	url = https://github.com/JoakimSoderberg/Arduino-DS2762.git
 [submodule "kthermlib"]
 	path = kthermlib
-	url = git@github.com:Miceuz/k-thermocouple-lib.git
+	url = https://github.com/JoakimSoderberg/k-thermocouple-lib.git
 [submodule "MemoryFree"]
 	path = MemoryFree
-	url = git@github.com:McNeight/MemoryFree.git
+	url = https://github.com/McNeight/MemoryFree.git
