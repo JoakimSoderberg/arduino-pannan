@@ -61,23 +61,19 @@ Webserver
 * Edit names of sensors and save them in EEPROM `http://server/names`
 * Output JSON with all sensors and values: `http://server/json`
 
-HTTP Client
-+++++++++++
+**HTTP Client**
 
 * Periodically connects to a host and does a HTTP PUT with the json values.
 
-LCD Screen
-++++++++++
+**LCD Screen**
 
 * Support for a 2 line Adafruit LCD screen via software serial.
 
-DS2762
-++++++
+**DS2762**
 
 * 1-Wire sensor with support for k-type thermocouple.
 
-DS18B20
-+++++++
+**DS18B20**
 
 * Main temperatur sensors
 
