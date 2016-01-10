@@ -6,6 +6,8 @@
 #include <SoftwareSerial.h>
 #include <Button.h>
 #include <DS2762.h>
+#include <thermocouple.h>
+#include <MemoryFree.h>
 
 #include "pannan.h"
 #include "names.h"
@@ -91,6 +93,77 @@ void set_error(const char *error)
     // TODO: Set error stuff. Turn on LED, show LCD message.
 }
 
+static char byte_map[] = 
+{
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'A', 'B', 'C', 'D', 'E', 'F'
+};
+
+// Utility function to convert nibbles (4 bit values)
+// into a hex character representation.
+static char nibble_to_char(uint8_t nibble)
+{
+    if (nibble < sizeof(byte_map))
+        return byte_map[nibble];
+    return '*';
+}
+
+char *hex2buf(char *buf, uint8_t b)
+{
+    buf[0] = nibble_to_char(b >> 4);
+    buf[1] = nibble_to_char(b & 0x0f);
+    buf[2] = 0;
+    return buf;
+}
+
+char *int2buf(char *buf, int *i, int val)
+{
+    int len = 0;
+    char neg = 0;
+    int valcpy = val;
+
+    if (val == 0)
+    {
+        buf[0] = '0';
+        buf[1] = 0;
+        len = 1;
+        goto done;
+    }
+
+    if (val < 0)
+    {
+        neg = 1;
+        val = -val;
+        len++;
+    }
+
+    // Get length of final string.
+    while (valcpy != 0)
+    {
+        len++;
+        valcpy /= 10;
+    }
+
+    for (int j = 0; j < len; j++)
+    {
+        buf[len - (j + 1)] = (val % 10) + '0';
+        val /= 10;
+    }
+
+    if (neg)
+    {
+        buf[0] = '-';
+    }
+
+    buf[len] = 0;
+
+done:
+    if (i)
+        (*i) += len;
+
+    return buf;
+}
+
 void print_sensor(int i, TempSensor *sensor,
                   byte newline = 1, byte show_temperature = 0)
 {
@@ -101,18 +174,31 @@ void print_sensor(int i, TempSensor *sensor,
     if (show_temperature)
     {
         Serial.print(" ");
-        Serial.print(sensor->temp);
-        Serial.print("C");
+
+        #ifndef PANNAN_DS2762
+        if (sensor->type == SENSOR_DS2762)
+        {
+            Serial.print("-");
+        }
+        else
+        #endif // PANNAN_DS2762
+        {
+            Serial.print(sensor->temp);
+            Serial.print("C");
+        }
     }
 
     Serial.print(" ");
     Serial.print(sensor->name);
-   
 
     if (sensor->type == SENSOR_DS2762) 
+    {
         Serial.println(" *");
+    }
     else
+    {
         Serial.println(" ");
+    }
 
     if (newline) Serial.println();
 }
@@ -199,45 +285,59 @@ void feed_dhcp()
     }
 }
 
-char *get_address_str(char *buf, DeviceAddress *addr)
+char *get_address_str(char *buf, DeviceAddress addr)
 {
     uint8_t j = 0;
     uint8_t step;
 
+    #if 1
     for (uint8_t i = 0; i < ADDR_SIZE; i++)
     {
-        step = 2;
+        /*step = 2;
 
         // zero pad the address if necessary
         if ((*addr)[i] < 16)
         {
             buf[j++] = '0';
             step--;
-        }
+        }*/
 
         // avr version does not have 0 padding...
-        sprintf(&buf[j], "%X", (*addr)[i]);
-
-        j += step;
+        //sprintf(&buf[j], "%X", (*addr)[i]);
+        hex2buf(&buf[j], addr[i]);
+        j += 2;
+        //j += step;
     }
+    buf[j] = 0;
+    #endif
 
     return buf;
 }
 
-#define SENSOR_JSON_FMT         \
-    "    {\n"                   \
-    "      \"name\": \"%s\",\n" \
-    "      \"index\": %d,\n"    \
-    "      \"addr\": \"%s\",\n" \
-    "      \"temp\": %s\n"      \
-    "    }"
+#define SENSOR_JSON_FMT                \
+    "    {\n"                          \
+    "      \"name\": \"%s\",\n"        \
+    "      \"index\": %d,\n"           \
+    "      \"addr\": \"%s\",\n"        \
+    "      \"temp\": %s\n"             \
+    "    }" 
+
+#ifdef PANNAN_DS2762
+#define SENSOR_DS2762_JSON_FMT         \
+    ",\n"                              \
+    "      \"mv\": \"%s\",\n"          \
+    "      \"ambient\": \"%s\"\n" 
+#else
+#define SENSOR_DS2762_JSON_FMT
+#endif // PANNAN_DS2762
+
 #define SENSOR_ADDR_SIZE (ADDR_SIZE * 2 + 1)
-#define SENSOR_TEMP_SIZE 6
-#define SENSOR_BUF_SIZE (sizeof(SENSOR_JSON_FMT) + SENSOR_ADDR_SIZE + SENSOR_TEMP_SIZE)
+#define SENSOR_TEMP_SIZE 7
+#define SENSOR_BUF_SIZE (sizeof(SENSOR_JSON_FMT SENSOR_DS2762_JSON_FMT) \
+                        + SENSOR_ADDR_SIZE + SENSOR_TEMP_SIZE*2)
 
 char *get_sensor_json(char *buf, int i, TempSensor *s)
 {
-    char addrbuf[SENSOR_ADDR_SIZE];
     char str_temp[SENSOR_TEMP_SIZE];
 
     if (s->temp == DEVICE_DISCONNECTED_C)
@@ -249,32 +349,54 @@ char *get_sensor_json(char *buf, int i, TempSensor *s)
         dtostrf(s->temp, 2, 2, str_temp);
     }
 
-    sprintf(buf, SENSOR_JSON_FMT,
-            s->name, i, get_address_str(addrbuf, &s->addr), str_temp);
+    int j = 0;
+    #define ADD2BUF(str) strcpy(&buf[j], str); j+= strlen(str);
+    #define ADDI2BUF(v) int2buf(&buf[j], &j, v);
+    ADD2BUF("    {\n"
+            "      \"name\": \""); ADD2BUF(s->name);  ADD2BUF("\",\n");
+    ADD2BUF("      \"index\": ");  ADDI2BUF(i);       ADD2BUF(",\n");
+    ADD2BUF("      \"addr\": \""); ADD2BUF(get_address_str(&buf[j], s->addr));
+                                                      ADD2BUF("\",\n");
+    ADD2BUF("      \"temp\": ");   ADD2BUF(str_temp);
+    #ifdef PANNAN_DS2762
+    if (s->type == SENSOR_DS2762)
+    {
+    dtostrf(s->ambient_temp, 2, 2, str_temp);
+    ADD2BUF(",\n");
+    ADD2BUF("      \"mv\": ");     ADDI2BUF(s->microvolts); ADD2BUF(",\n");
+    ADD2BUF("      \"ambient\": ");ADD2BUF(str_temp);
+    }
+    #endif // PANNAN_DS2762
+    ADD2BUF("\n"
+            "    }");
 
     return buf;
 }
 
+/*
 char *dec2hex(int a)
 {
-    static char buf[4];
-    sprintf(buf, "%x", a);
+    //static char buf[4];
+    //sprintf(buf, "%x", a);
+
+    buf[0] = 0;
     return buf;
-}
+}*/
 
 void print_sensor_json(Print &c, int i, TempSensor *s)
 {
     char buf[SENSOR_BUF_SIZE];
+    char hex[4];
     char *str = get_sensor_json(buf, i, s);
-    c.println(dec2hex(strlen(str)));
+    c.println(hex2buf(hex, strlen(str)));
     c.println(str);
 }
 
-#define PRINT_CHUNK(str)                        \
-    do                                          \
-    {                                           \
-        c.println(dec2hex(sizeof(str) - 1));    \
-        c.println(F(str));                      \
+#define PRINT_CHUNK(str)                            \
+    do                                              \
+    {                                               \
+        c.println(hex2buf(hex, sizeof(str) - 1));   \
+        c.println(F(str));                          \
     } while (0)
 
 //
@@ -282,6 +404,8 @@ void print_sensor_json(Print &c, int i, TempSensor *s)
 //
 void print_http_request_json(Print &c)
 {
+    char hex[4];
+
     PRINT_CHUNK("{\n" \
                 "  \"sensors\":\n"
                 "  [\n");
@@ -331,7 +455,7 @@ int http_request()
     int ret;
     EthernetClient client;
 
-    Serial.print(F("HTTP Client request to "));
+    //Serial.print(F("HTTP Client request to "));
     Serial.println(ctx.settings.server_hostname);
 
     if ((ret = client.connect(ctx.settings.server_hostname,
@@ -339,11 +463,11 @@ int http_request()
     {
         int j = 0;
         int end;
-        Serial.println(F("  Connected..."));
+        //Serial.println(F("  Connected..."));
 
         client.println(F("PUT / HTTP/1.1\r\n"
-                         "User-Agent: arduino-ethernet\r\n"
-                         "Connection: close\r\n"
+                         //"User-Agent: arduino-ethernet\r\n"
+                         //"Connection: close\r\n"
                          "Content-Type: application/json\r\n"
                          "Transfer-Encoding: chunked\r\n"));
         client.print(F("Host: "));
@@ -377,7 +501,7 @@ int http_request()
         status_code = get_http_status_code(buf, sizeof(buf));
 
         client.stop();
-        Serial.print("Status: ");
+        //Serial.print("Status: ");
         Serial.println(status_code);
         //Serial.println(F("  Disconnected"));
     }
@@ -440,10 +564,12 @@ void server_404_reply(Print &c)
     SHTML("<html>404 bad url!</html>");
 }
 
+#if 0
 void server_unsupported_reply(Print &c)
 {
     send_http_response_header(c, "501 Method not supported");
 }
+#endif
 
 void server_json_reply(Print &c, char *url)
 {
@@ -489,6 +615,8 @@ void server_home_reply(Print &c, char *url)
     SHTML("</div>");
     c.println(FS(HTML_BODY_END));
 }
+
+#ifdef PANNAN_NAME_SUPPORT
 
 const char TD_STARTEND[] PROGMEM = "</td><td>";
 
@@ -639,6 +767,7 @@ void server_setname_reply(Print &c, char *url, char *post)
     SHTML("Location: /names");
     c.println();
 }
+#endif // PANNAN_NAME_SUPPORT
 
 char *server_get_query_string(int i, char *buf, int bufsize)
 {
@@ -714,6 +843,7 @@ void feed_server()
                         {
                             server_json_reply(sclient, url);
                         }
+                        #ifdef PANNAN_NAME_SUPPORT
                         else if (!strncmp(url, "/names", 6))
                         {
                             server_names_form_reply(sclient, url + 6);
@@ -722,11 +852,13 @@ void feed_server()
                         {
                             server_editname_form_reply(sclient, url + 10);
                         }
+                        #endif // PANNAN_NAME_SUPPORT
                         else
                         {
                             server_404_reply(sclient);
                         }
                     }
+                    #ifdef PANNAN_NAME_SUPPORT
                     else if (method == POST)
                     {
                         char *post;
@@ -753,10 +885,10 @@ void feed_server()
                         free(url);
                         goto end;
                     }
+                    #endif // PANNAN_NAME_SUPPORT
                     else
                     {
-                        //Serial.println(F("Unsupported method"));
-                        server_unsupported_reply(sclient);
+                        //server_unsupported_reply(sclient);
                         goto end;
                     }
 
@@ -813,21 +945,42 @@ void print_lcd_started()
     // TODO: Print IP.
 }
 
-void print_lcd_temperature_buf(int i)
+void print_lcd_temperature_buf(int i, int line)
 {
-    char buf[16];
-    char str_temp[6];
+    char str_temp[7];
     TempSensor *s = &ctx.temps[i];
-    if (s->temp == DEVICE_DISCONNECTED_C)
+
+    if ((s->type == SENSOR_DS18B20)
+     && (s->temp == DEVICE_DISCONNECTED_C))
     {
         strcpy(str_temp, "-");
     }
+    #ifndef PANNAN_DS2762
+    else if (s->type SENSOR_DS2762)
+    {
+        strcpy(str_temp, "off ");
+    }
+    #endif // PANNAN_DS2762
     else
     {
         dtostrf(s->temp, 2, 2, str_temp);
     }
-    sprintf(buf, "%-10s%4sC", s->name, str_temp);
-    lcd.write(buf);
+
+    lcd.write(s->name);
+
+    // Right justify temperature.
+    lcd.write(254);
+    if (strlen(str_temp) == 5)
+    {
+        lcd.write((line == 0) ? 138 : 202); // Move to pos 11.
+    }
+    else
+    {
+        lcd.write((line == 0) ? 137 : 201); // Move to pos 10 for >= 100.
+    }
+
+    lcd.write(str_temp);
+    lcd.write("C");
 }
 
 void print_lcd_temperatures()
@@ -835,11 +988,13 @@ void print_lcd_temperatures()
     int i = lcd_start_index;
     char str_temp[6];
 
+    lcd_clear();
+
     // Move cursor to beginning of first line.
     lcd.write(254);
     lcd.write(128);
 
-    print_lcd_temperature_buf(i);
+    print_lcd_temperature_buf(i, 0);
     i++;
 
     // Move cursor to beginning of second line.
@@ -848,11 +1003,7 @@ void print_lcd_temperatures()
 
     if (i < ctx.count)
     {
-        print_lcd_temperature_buf(i);
-    }
-    else
-    {
-        lcd.write("                ");
+        print_lcd_temperature_buf(i, 1);
     }
 }
 
@@ -946,11 +1097,32 @@ void read_temp_sensors()
             }
             else
             {
+                #ifdef PANNAN_DS2762
                 DS2762 ds(&oneWire, s->addr);
-                s->temp = ds.readADC(); // ds.readTempC();
+                // Each raw value count equals 15.625 microVolt,
+                // we want it in millivolts.
+                s->microvolts = ds.readCurrentRaw();
+
+                // Each raw value count equals 0.125C, 
+                // The thermocouple lib wants it x1000.
+                // So 0.125*1000 = 125.
+                int16_t ambient_temp = ds.readTempRaw();
+                s->ambient_temp = ambient_temp * 0.125;
+
+                //Serial.print(" Current: ");
+                //Serial.print(current);
+                //Serial.print("mV Ambient temp: ");
+                //Serial.println(ambient_temp);
+                long raw_temp = thermocoupleConvertWithCJCompensation(
+                                    (unsigned long)ds.readCurrentRaw() * 15.625,
+                                    ambient_temp * 125ul);
+
+                s->temp = (double)raw_temp / 1000;
+                #endif // PANNAN_DS2762
             }
 
             print_sensor(i, s, 0, 1);
+            delay(10);
         }
 
         last_temp_read = millis();
@@ -961,11 +1133,13 @@ void read_temp_sensors()
 
 void init_default_settings()
 {
+    #ifdef PANNAN_CLIENT
     strncpy_P(ctx.settings.server_hostname,
               DEFAULT_HOSTNAME, sizeof(ctx.settings.server_hostname) - 1);
     ctx.settings.server_port = HTTP_REQUEST_PORT_DEFAULT;
     ctx.settings.http_request_delay = HTTP_REQUEST_DELAY_DEFAULT;
     ctx.settings.http_client_enabled = 1;
+    #endif // PANNAN_CLIENT
 }
 
 void setup()
@@ -979,13 +1153,15 @@ void setup()
 
     init_default_settings();
 
-    //Serial.println(F("Serial port active..."));
+    Serial.println(F("Serial port active..."));
 
     lcd.begin(9600);
     delay(500);
     //Serial.println(F("LCD serial active..."));
 
     prepare_sensors();
+    Serial.print("freeMemory()=");
+    Serial.println(freeMemory());
 
     //Serial.println(F("Start Ethernet..."));
 
