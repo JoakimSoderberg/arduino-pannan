@@ -4,7 +4,7 @@
 
 #include <DallasTemperature.h>
 
-#define MAX_TEMP_SENSORS 15 // TODO: To raise this, read from eeprom value by value instead.
+#define MAX_TEMP_SENSORS 14 // TODO: To raise this, read from eeprom value by value instead.
 #define MAX_NAME_LEN 10
 
 #define member_size(type, member) sizeof(((type *)0)->member)

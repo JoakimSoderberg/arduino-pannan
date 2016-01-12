@@ -11,6 +11,7 @@
 
 #include "pannan.h"
 #include "names.h"
+#include <avr/wdt.h>
 
 //
 // Not sure why, but we need to declare this for the Ethernet lib
@@ -116,6 +117,7 @@ char *hex2buf(char *buf, uint8_t b)
     return buf;
 }
 
+
 char *int2buf(char *buf, int *i, int val)
 {
     int len = 0;
@@ -215,9 +217,9 @@ void prepare_sensors()
     ctx.count = sensors.getDeviceCount();
 
     Serial.print(F("Locating devices..."));
-    Serial.print("Found ");
+    Serial.print(F("Found "));
     Serial.print(ctx.count, DEC);
-    Serial.println(" devices.");
+    Serial.println(F(" devices."));
 
     //Serial.println(F("Get device names from EEPROM..."));
     eeprom_read_temp_sensors(names, &name_count);
@@ -293,20 +295,8 @@ char *get_address_str(char *buf, DeviceAddress addr)
     #if 1
     for (uint8_t i = 0; i < ADDR_SIZE; i++)
     {
-        /*step = 2;
-
-        // zero pad the address if necessary
-        if ((*addr)[i] < 16)
-        {
-            buf[j++] = '0';
-            step--;
-        }*/
-
-        // avr version does not have 0 padding...
-        //sprintf(&buf[j], "%X", (*addr)[i]);
         hex2buf(&buf[j], addr[i]);
         j += 2;
-        //j += step;
     }
     buf[j] = 0;
     #endif
@@ -372,16 +362,6 @@ char *get_sensor_json(char *buf, int i, TempSensor *s)
 
     return buf;
 }
-
-/*
-char *dec2hex(int a)
-{
-    //static char buf[4];
-    //sprintf(buf, "%x", a);
-
-    buf[0] = 0;
-    return buf;
-}*/
 
 void print_sensor_json(Print &c, int i, TempSensor *s)
 {
@@ -1028,6 +1008,7 @@ void lcd_button_state_change()
             lcd_scroll_enabled = 1;
             lcd_clear();
             lcd.println(F("Scroll enabled"));
+            wdt_reset();
             delay(1000);
         }    
         return;
@@ -1051,6 +1032,7 @@ void lcd_button_state_change()
         if (lcd_scroll_enabled)
         {
             lcd.println(F("Scroll disabled"));
+            wdt_reset();
             delay(1000);
             lcd_scroll_enabled = 0;
         }
@@ -1142,9 +1124,23 @@ void init_default_settings()
     #endif // PANNAN_CLIENT
 }
 
+void print_free_mem()
+{
+    static unsigned long last_free = 0;
+
+    if ((millis() - last_free) > READ_DELAY)
+    {
+        Serial.print("mem: ");
+        Serial.println(freeMemory());
+        last_free = millis();
+    }
+}
+
 void setup()
 {
+    wdt_enable(WDTO_4S);
     Serial.begin(9600);
+    wdt_reset();
 
     while (!Serial)
     {
@@ -1152,43 +1148,46 @@ void setup()
     }
 
     init_default_settings();
+    wdt_reset();
 
     Serial.println(F("Serial port active..."));
+    wdt_reset();
 
     lcd.begin(9600);
     delay(500);
+    wdt_reset();
     //Serial.println(F("LCD serial active..."));
 
     prepare_sensors();
-    Serial.print("freeMemory()=");
-    Serial.println(freeMemory());
+    wdt_reset();
 
     //Serial.println(F("Start Ethernet..."));
+    lcd_clear();
+    lcd.write("Getting IP");
 
-    // TODO: Don't retry here, add an error state
-    //       and use watchdog timer to reset until we got DHCP
     // Initiate DHCP request for IP.
     if (Ethernet.begin(mac) == 0)
     {
-        //Serial.println(F("Failed to configure Ethernet using DHCP..."));
-        while (Ethernet.begin(mac) == 0)
-        {
-            delay(READ_DELAY);
-        }
+        while (1);
     }
 
     print_ip(Ethernet.localIP());
+    wdt_reset();
 
     #ifdef PANNAN_SERVER
     server.begin();
     #endif
+    wdt_reset();
 
     print_lcd_started();
     delay(1000);
+    wdt_reset();
 }
 
 void loop()
 {
+    wdt_reset();
+
     feed_lcd();
 
     read_temp_sensors();
@@ -1203,4 +1202,5 @@ void loop()
     #endif // PANNAN_SERVER
 
     feed_dhcp();
+    print_free_mem();
 }

@@ -11,6 +11,9 @@ option(PANNAN_SERVER "Turn on HTTP server" ON)
 option(PANNAN_DS2762 "Turn on DS2762 thermocouple support" ON)
 option(PANNAN_NAMES "Turn on support for setting names via webserver (does not fit together with thermocouple)" OFF)
 
+# TODO: Option to set serial port.
+# TODO: Option to set serial port program.
+
 set(ARDUINO_DEFAULT_BOARD ethernet) # Default Board ID, when not specified
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/arduino-cmake/cmake/Platform)
