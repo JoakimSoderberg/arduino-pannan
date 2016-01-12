@@ -936,7 +936,7 @@ void print_lcd_temperature_buf(int i, int line)
         strcpy(str_temp, "-");
     }
     #ifndef PANNAN_DS2762
-    else if (s->type SENSOR_DS2762)
+    else if (s->type == SENSOR_DS2762)
     {
         strcpy(str_temp, "off ");
     }
