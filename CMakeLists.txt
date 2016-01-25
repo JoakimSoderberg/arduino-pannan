@@ -40,7 +40,7 @@ if (PANNAN_DS2762)
 endif()
 
 if (PANNAN_NAMES)
-    add_definitions(-DPANNAN_NAMES)
+    add_definitions(-DPANNAN_NAME_SUPPORT)
 endif()
 
 
